@@ -1,19 +1,32 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAuth, initializeAuth } from "firebase/auth";
+import { getAuth, initializeAuth, getReactNativePersistence } from "firebase/auth";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getReactNativePersistence } from 'firebase/auth';
 
-// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyDHY-8OscYtL6W86107YQ1xKHlz4QYJgLA",
-  authDomain: "spacewars-6be2e.firebaseapp.com",
-  projectId: "spacewars-6be2e",
-  storageBucket: "spacewars-6be2e.firebasestorage.app",
-  messagingSenderId: "391652131150",
-  appId: "1:391652131150:web:9c54b876a9bee52cff1e1f",
-  measurementId: "G-KX6L9QT3YR"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
+
+const missingConfig = [
+  'apiKey',
+  'authDomain',
+  'projectId',
+  'storageBucket',
+  'messagingSenderId',
+  'appId',
+].filter((key) => !firebaseConfig[key]);
+
+if (missingConfig.length > 0) {
+  throw new Error(
+    `Missing Firebase env vars: ${missingConfig.map((key) => `EXPO_PUBLIC_FIREBASE_${key.replace(/[A-Z]/g, (char) => `_${char}`).toUpperCase()}`).join(', ')}`
+  );
+}
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
