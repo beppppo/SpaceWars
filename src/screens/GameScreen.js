@@ -6,6 +6,7 @@ import Joystick from '../components/Joystick';
 import GameTimer from '../components/GameTimer';
 import { ChunkManager } from '../utils/ChunkManager';
 import enemySprite from '../../assets/enemy.png';
+import expCrystalSprite from '../../assets/expcrystal.png';
 import spaceshipSprite from '../../assets/spaceship.png';
 import spaceshipShootingSprite from '../../assets/spaceshipShooting.png';
 
@@ -29,6 +30,14 @@ const ENEMY_COLLISION_RADIUS = 16;
 const BULLET_COLLISION_RADIUS = 6;
 const BULLET_ENEMY_HIT_RADIUS = 3;
 const ENEMY_BULLET_HIT_RADIUS = 12;
+const EXP_CRYSTAL_VALUE = 10;
+const EXP_CRYSTAL_SIZE = 16;
+const INITIAL_PLAYER_LEVEL = 1;
+const INITIAL_EXP_TO_NEXT_LEVEL = 100;
+const PLAYER_PICKUP_RADIUS = 28;
+const EXP_CRYSTAL_PICKUP_RADIUS = 12;
+const CRYSTAL_COLLECT_SPEED = 400;
+const CRYSTAL_COLLECT_COMPLETE_RADIUS = 8;
 
 function isColliding(x1, y1, r1, x2, y2, r2) {
   const dx = x2 - x1;
@@ -45,9 +54,13 @@ export default function GameScreen({ navigation }) {
   const [isPaused, setIsPaused] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [playerHealth, setPlayerHealth] = useState(MAX_HEALTH);
+  const [playerExp, setPlayerExp] = useState(0);
+  const [playerLevel, setPlayerLevel] = useState(INITIAL_PLAYER_LEVEL);
+  const [expToNextLevel, setExpToNextLevel] = useState(INITIAL_EXP_TO_NEXT_LEVEL);
   const [finalTime, setFinalTime] = useState(0);
   const [renderedEnemies, setRenderedEnemies] = useState([]);
   const [renderedBullets, setRenderedBullets] = useState([]);
+  const [renderedExpCrystals, setRenderedExpCrystals] = useState([]);
 
   // World and chunk management
   const chunkManagerRef = useRef(null);
@@ -85,10 +98,12 @@ export default function GameScreen({ navigation }) {
   const frameCountRef = useRef(0);
   const enemiesRef = useRef([]);
   const bulletsRef = useRef([]);
+  const expCrystalsRef = useRef([]);
   const enemySpawnAccumulatorRef = useRef(0);
   const fireAccumulatorRef = useRef(0);
   const enemyIdCounterRef = useRef(0);
   const bulletIdCounterRef = useRef(0);
+  const expCrystalIdCounterRef = useRef(0);
   const lastDamageTimeRef = useRef(0);
   const didGameOverRef = useRef(false);
 
@@ -178,6 +193,20 @@ export default function GameScreen({ navigation }) {
     };
   }, []);
 
+  const createExpCrystal = useCallback((x, y, value = EXP_CRYSTAL_VALUE) => {
+    expCrystalIdCounterRef.current += 1;
+
+    return {
+      id: expCrystalIdCounterRef.current,
+      x,
+      y,
+      value,
+      size: EXP_CRYSTAL_SIZE,
+      isCollecting: false,
+      collectSpeed: CRYSTAL_COLLECT_SPEED,
+    };
+  }, []);
+
   const stopGameLoop = useCallback(() => {
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -214,8 +243,10 @@ export default function GameScreen({ navigation }) {
     fireAccumulatorRef.current = 0;
     enemyIdCounterRef.current = 0;
     bulletIdCounterRef.current = 0;
+    expCrystalIdCounterRef.current = 0;
     enemiesRef.current = [];
     bulletsRef.current = [];
+    expCrystalsRef.current = [];
     playerHealthRef.current = MAX_HEALTH;
     lastDamageTimeRef.current = 0;
     didGameOverRef.current = false;
@@ -224,8 +255,12 @@ export default function GameScreen({ navigation }) {
     setPlayerWorldPosition({ x: 0, y: 0 });
     setShipRotation(0);
     setPlayerHealth(MAX_HEALTH);
+    setPlayerExp(0);
+    setPlayerLevel(INITIAL_PLAYER_LEVEL);
+    setExpToNextLevel(INITIAL_EXP_TO_NEXT_LEVEL);
     setRenderedEnemies([]);
     setRenderedBullets([]);
+    setRenderedExpCrystals([]);
 
     if (chunkManagerRef.current) {
       const chunks = chunkManagerRef.current.updateChunks(0, 0);
@@ -546,6 +581,7 @@ export default function GameScreen({ navigation }) {
             bulletsToRemove.add(bullet.id);
 
             if (enemy.health <= 0) {
+              expCrystalsRef.current.push(createExpCrystal(enemy.x, enemy.y));
               enemiesToRemove.add(enemy.id);
             }
             break;
@@ -555,6 +591,53 @@ export default function GameScreen({ navigation }) {
 
       enemiesRef.current = nextEnemies.filter((enemy) => !enemiesToRemove.has(enemy.id));
       bulletsRef.current = nextBullets.filter((bullet) => !bulletsToRemove.has(bullet.id));
+
+      let expGainedThisFrame = 0;
+      const nextExpCrystals = [];
+
+      for (let i = 0; i < expCrystalsRef.current.length; i += 1) {
+        const crystal = expCrystalsRef.current[i];
+        if (!crystal.isCollecting) {
+          if (
+            isColliding(
+              playerX,
+              playerY,
+              PLAYER_PICKUP_RADIUS,
+              crystal.x,
+              crystal.y,
+              EXP_CRYSTAL_PICKUP_RADIUS
+            )
+          ) {
+            crystal.isCollecting = true;
+          }
+        }
+
+        if (crystal.isCollecting) {
+          const dx = playerX - crystal.x;
+          const dy = playerY - crystal.y;
+          const distanceSq = dx * dx + dy * dy;
+
+          if (distanceSq <= CRYSTAL_COLLECT_COMPLETE_RADIUS * CRYSTAL_COLLECT_COMPLETE_RADIUS) {
+            expGainedThisFrame += crystal.value;
+            continue;
+          }
+
+          const distance = Math.sqrt(distanceSq);
+          if (distance > 0.0001) {
+            const dirX = dx / distance;
+            const dirY = dy / distance;
+            crystal.x += dirX * crystal.collectSpeed * dt;
+            crystal.y += dirY * crystal.collectSpeed * dt;
+          }
+        }
+
+        nextExpCrystals.push(crystal);
+      }
+
+      expCrystalsRef.current = nextExpCrystals;
+      if (expGainedThisFrame > 0) {
+        setPlayerExp((prevExp) => prevExp + expGainedThisFrame);
+      }
 
       // Render uses latest world position each frame
       alphaRef.current = 1;
@@ -569,6 +652,7 @@ export default function GameScreen({ navigation }) {
         });
         setRenderedEnemies([...enemiesRef.current]);
         setRenderedBullets([...bulletsRef.current]);
+        setRenderedExpCrystals([...expCrystalsRef.current]);
       }
 
       animationFrameRef.current = requestAnimationFrame(gameLoop);
@@ -582,6 +666,7 @@ export default function GameScreen({ navigation }) {
   }, [
     createBullet,
     createEnemy,
+    createExpCrystal,
     findNearestEnemy,
     handleGameOver,
     enemySpawnIntervalMs,
@@ -699,6 +784,24 @@ export default function GameScreen({ navigation }) {
                 left: bullet.x - worldOffsetX - BULLET_RENDER_SIZE / 2,
                 top: bullet.y - worldOffsetY - BULLET_RENDER_SIZE / 2,
                 transform: [{ rotate: `${bullet.angleDeg + BULLET_SPRITE_ROTATION_OFFSET_DEG}deg` }],
+              },
+            ]}
+            resizeMode="contain"
+          />
+        ))}
+
+        {renderedExpCrystals.map((crystal) => (
+          <Image
+            key={crystal.id}
+            source={expCrystalSprite}
+            pointerEvents="none"
+            style={[
+              styles.expCrystal,
+              {
+                width: crystal.size,
+                height: crystal.size,
+                left: crystal.x - worldOffsetX - crystal.size / 2,
+                top: crystal.y - worldOffsetY - crystal.size / 2,
               },
             ]}
             resizeMode="contain"
@@ -829,6 +932,9 @@ const styles = StyleSheet.create({
   bullet: {
     position: 'absolute',
   },
+  expCrystal: {
+    position: 'absolute',
+  },
   playerShipWrapper: {
     position: 'absolute',
   },
@@ -861,7 +967,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#0a1220',
+    backgroundColor: 'transparent',
   },
   healthHudDimmed: {
     opacity: 0.45,
