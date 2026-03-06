@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 
-const GameTimer = ({ isPlaying, isPaused, onGameEnd, initialTime = 0 }) => {
+const GameTimer = ({ isPlaying, isPaused, onGameEnd, initialTime = 0, dimmed = false }) => {
   const [, setTime] = useState(initialTime);
   const startTimeRef = useRef(Date.now() - initialTime);
   const animationFrameRef = useRef(null);
@@ -97,8 +97,8 @@ const GameTimer = ({ isPlaying, isPaused, onGameEnd, initialTime = 0 }) => {
   }, [isPlaying, isPaused, initialTime, onGameEnd]);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.timerText}>{displayTime}</Text>
+    <View style={[styles.container, dimmed && styles.containerDimmed]}>
+      <Text style={[styles.timerText, dimmed && styles.timerTextDimmed]}>{displayTime}</Text>
     </View>
   );
 };
@@ -106,11 +106,14 @@ const GameTimer = ({ isPlaying, isPaused, onGameEnd, initialTime = 0 }) => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 10,
+    top: 2,
     left: 0,
     right: 0,
     alignItems: 'center',
-    zIndex: 1000,
+    zIndex: 10,
+  },
+  containerDimmed: {
+    opacity: 0.45,
   },
   timerText: {
     color: '#f6e7c1',
@@ -121,6 +124,9 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 2, height: 2 },
     textShadowRadius: 2,
     letterSpacing: 1,
+  },
+  timerTextDimmed: {
+    color: '#9aa3b5',
   },
 });
 
