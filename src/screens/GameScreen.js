@@ -13,15 +13,15 @@ import spaceshipShootingSprite from '../../assets/spaceshipShooting.png';
 const MAIN_MENU_ROUTE = 'MainMenu';
 const INITIAL_MAX_HEALTH = 100;
 const BASE_ENEMY_HEALTH = 20;
-const BASE_ENEMY_SPEED = 120;
-const BASE_ENEMY_SPAWN_INTERVAL_MS = 1500;
-const DAMAGE_PER_HIT = 20;
+const BASE_ENEMY_SPEED = 70;
+const BASE_ENEMY_SPAWN_INTERVAL_MS = 900;
+const DAMAGE_PER_HIT = 10;
 const DAMAGE_COOLDOWN_MS = 800;
-const INITIAL_FIRE_INTERVAL_MS = 600;
-const INITIAL_BULLET_DAMAGE = 10;
+const INITIAL_FIRE_INTERVAL_MS = 550;
+const INITIAL_BULLET_DAMAGE = 15;
 const BULLET_SPEED = 550;
 const INITIAL_BULLET_SIZE = 10;
-const INITIAL_PLAYER_SPEED = 130;
+const INITIAL_PLAYER_SPEED = 150;
 const BULLET_RENDER_SIZE = 45;
 const BULLET_MAX_LIFETIME_MS = 2000;
 const BULLET_SPRITE_ROTATION_OFFSET_DEG = 90;
@@ -95,18 +95,46 @@ function getNextExpRequirement(currentRequirement) {
 }
 
 function getSpawnInterval(timeSeconds) {
-  const spawnLevel = Math.floor(timeSeconds / 30);
-  return Math.max(400, Math.floor(BASE_ENEMY_SPAWN_INTERVAL_MS * Math.pow(0.95, spawnLevel)));
+  const spawnLevel = Math.floor(timeSeconds / 12);
+  return Math.max(300, Math.floor(BASE_ENEMY_SPAWN_INTERVAL_MS * Math.pow(0.95, spawnLevel)));
 }
 
 function getEnemyHealth(timeSeconds) {
-  const spawnLevel = Math.floor(timeSeconds / 30);
-  return BASE_ENEMY_HEALTH + spawnLevel * 5;
+  const spawnLevel = Math.floor(timeSeconds / 90);
+  return BASE_ENEMY_HEALTH + spawnLevel * 2;
 }
 
 function getEnemySpeed(timeSeconds) {
-  const speedLevel = Math.floor(timeSeconds / 60);
-  return BASE_ENEMY_SPEED + speedLevel * 10;
+  const speedLevel = Math.floor(timeSeconds / 120);
+  return BASE_ENEMY_SPEED + speedLevel * 3;
+}
+
+function getMinimumActiveEnemies(timeSeconds) {
+  if (timeSeconds < 30) {
+    return 14;
+  }
+
+  if (timeSeconds < 60) {
+    return 18;
+  }
+
+  if (timeSeconds < 120) {
+    return 24;
+  }
+
+  if (timeSeconds < 300) {
+    return 30;
+  }
+
+  return 36;
+}
+
+function getSpawnMargin(timeSeconds) {
+  if (timeSeconds < 300) {
+    return 80;
+  }
+
+  return 180;
 }
 
 export default function GameScreen({ navigation }) {
@@ -211,20 +239,23 @@ export default function GameScreen({ navigation }) {
   const enemySize = 32;
   const playerCollisionRadius = shipSize * 0.4;
 
-  const getEnemySpawnAndDespawnRadii = useCallback(() => {
+  const getEnemySpawnAndDespawnRadii = useCallback((timeSeconds = Number.POSITIVE_INFINITY) => {
     const width = gameAreaLayout.width || screenWidth;
     const height = gameAreaLayout.height || screenHeight;
     const halfDiagonal = Math.sqrt(width * width + height * height) / 2;
+    const spawnMargin = getSpawnMargin(timeSeconds);
     return {
-      spawnRadius: halfDiagonal + 180,
+      spawnRadius: halfDiagonal + spawnMargin,
       despawnRadius: halfDiagonal * 3 + 600,
     };
   }, [gameAreaLayout.height, gameAreaLayout.width, screenHeight, screenWidth]);
 
   const createEnemy = useCallback((playerX, playerY, timeSeconds) => {
     const angle = Math.random() * Math.PI * 2;
-    const { spawnRadius } = getEnemySpawnAndDespawnRadii();
-    const speed = getEnemySpeed(timeSeconds);
+    const { spawnRadius } = getEnemySpawnAndDespawnRadii(timeSeconds);
+    let speed = getEnemySpeed(timeSeconds);
+    const maxEnemySpeed = playerSpeedRef.current * 0.75;
+    speed = Math.min(speed, maxEnemySpeed);
     const maxHealth = getEnemyHealth(timeSeconds);
     enemyIdCounterRef.current += 1;
 
@@ -818,13 +849,19 @@ export default function GameScreen({ navigation }) {
       const playerX = playerWorldPositionRef.current.x;
       const playerY = playerWorldPositionRef.current.y;
       const survivalTimeSeconds = survivalTimeMsRef.current / 1000;
-      const { despawnRadius } = getEnemySpawnAndDespawnRadii();
+      const { despawnRadius } = getEnemySpawnAndDespawnRadii(survivalTimeSeconds);
       const despawnRadiusSq = despawnRadius * despawnRadius;
       const currentSpawnIntervalMs = getSpawnInterval(survivalTimeSeconds);
 
       enemySpawnAccumulatorRef.current += deltaTime;
       while (enemySpawnAccumulatorRef.current >= currentSpawnIntervalMs) {
         enemySpawnAccumulatorRef.current -= currentSpawnIntervalMs;
+        enemiesRef.current.push(createEnemy(playerX, playerY, survivalTimeSeconds));
+      }
+
+      const minimumActiveEnemies = getMinimumActiveEnemies(survivalTimeSeconds);
+      const missingEnemies = minimumActiveEnemies - enemiesRef.current.length;
+      for (let i = 0; i < missingEnemies; i += 1) {
         enemiesRef.current.push(createEnemy(playerX, playerY, survivalTimeSeconds));
       }
 
