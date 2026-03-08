@@ -11,14 +11,17 @@ import spaceshipSprite from '../../assets/spaceship.png';
 import spaceshipShootingSprite from '../../assets/spaceshipShooting.png';
 
 const MAIN_MENU_ROUTE = 'MainMenu';
-const MAX_HEALTH = 100;
-const ENEMY_MAX_HEALTH = 30;
+const INITIAL_MAX_HEALTH = 100;
+const BASE_ENEMY_HEALTH = 20;
+const BASE_ENEMY_SPEED = 120;
+const BASE_ENEMY_SPAWN_INTERVAL_MS = 1500;
 const DAMAGE_PER_HIT = 20;
 const DAMAGE_COOLDOWN_MS = 800;
-const FIRE_INTERVAL_MS = 600;
-const BULLET_DAMAGE = 10;
+const INITIAL_FIRE_INTERVAL_MS = 600;
+const INITIAL_BULLET_DAMAGE = 10;
 const BULLET_SPEED = 550;
-const BULLET_SIZE = 10;
+const INITIAL_BULLET_SIZE = 10;
+const INITIAL_PLAYER_SPEED = 130;
 const BULLET_RENDER_SIZE = 45;
 const BULLET_MAX_LIFETIME_MS = 2000;
 const BULLET_SPRITE_ROTATION_OFFSET_DEG = 90;
@@ -34,10 +37,50 @@ const EXP_CRYSTAL_VALUE = 10;
 const EXP_CRYSTAL_SIZE = 16;
 const INITIAL_PLAYER_LEVEL = 1;
 const INITIAL_EXP_TO_NEXT_LEVEL = 100;
-const PLAYER_PICKUP_RADIUS = 28;
+const INITIAL_PICKUP_RADIUS = 28;
 const EXP_CRYSTAL_PICKUP_RADIUS = 12;
 const CRYSTAL_COLLECT_SPEED = 400;
 const CRYSTAL_COLLECT_COMPLETE_RADIUS = 8;
+const EXP_BAR_WIDTH = 160;
+const EXP_BAR_FLASH_DURATION_MS = 700;
+const INITIAL_EXP_MULTIPLIER = 1;
+const INITIAL_BULLET_PIERCE_COUNT = 0;
+const INITIAL_SHOT_COUNT = 1;
+// Victory condition (20 minutes)
+// For testing you can temporarily change to something like 10000 (10s)
+const VICTORY_TIME_MS = 20 * 60 * 1000;
+const DOUBLE_SHOT_SPAWN_OFFSET = 8;
+const DOUBLE_SHOT_ANGLE_OFFSET_DEG = 8;
+const TRIPLE_SHOT_ANGLE_OFFSET_DEG = 12;
+
+const UPGRADE_POOL = [
+  { id: 'damage_up', title: 'Power Shots', description: 'Increase bullet damage by 5', repeatable: true },
+  { id: 'fire_rate', title: 'Rapid Fire', description: 'Shoot 10% faster', repeatable: true },
+  { id: 'hp_up', title: 'Reinforced Hull', description: 'Increase max HP by 20 and heal 20 HP', repeatable: true },
+  { id: 'move_speed', title: 'Engine Boost', description: 'Increase movement speed by 20', repeatable: true },
+  { id: 'exp_worth', title: 'Knowledge Core', description: 'Increase EXP gained by 15%', repeatable: true },
+  { id: 'magnet_size', title: 'Gravity Field', description: 'Increase crystal pickup radius', repeatable: true },
+  {
+    id: 'piercing',
+    title: 'Piercing Rounds',
+    description: 'Bullets pass through 1 additional enemy',
+    repeatable: false,
+  },
+  {
+    id: 'double_shot',
+    title: 'Twin Fire',
+    description: 'Shoot 2 bullets at once',
+    repeatable: false,
+    exclusiveWith: 'triple_shot',
+  },
+  {
+    id: 'triple_shot',
+    title: 'Spread Burst',
+    description: 'Shoot 3 bullets at once, but slower',
+    repeatable: false,
+    exclusiveWith: 'double_shot',
+  },
+];
 
 function isColliding(x1, y1, r1, x2, y2, r2) {
   const dx = x2 - x1;
@@ -47,16 +90,50 @@ function isColliding(x1, y1, r1, x2, y2, r2) {
   return distanceSq <= radiusSum * radiusSum;
 }
 
+function getNextExpRequirement(currentRequirement) {
+  return Math.floor(currentRequirement * 1.25);
+}
+
+function getSpawnInterval(timeSeconds) {
+  const spawnLevel = Math.floor(timeSeconds / 30);
+  return Math.max(400, Math.floor(BASE_ENEMY_SPAWN_INTERVAL_MS * Math.pow(0.95, spawnLevel)));
+}
+
+function getEnemyHealth(timeSeconds) {
+  const spawnLevel = Math.floor(timeSeconds / 30);
+  return BASE_ENEMY_HEALTH + spawnLevel * 5;
+}
+
+function getEnemySpeed(timeSeconds) {
+  const speedLevel = Math.floor(timeSeconds / 60);
+  return BASE_ENEMY_SPEED + speedLevel * 10;
+}
+
 export default function GameScreen({ navigation }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [isPlaying, setIsPlaying] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
+  const [isLevelUpMenuOpen, setIsLevelUpMenuOpen] = useState(false);
+  const [hasWon, setHasWon] = useState(false);
+  const [isVictoryMenuOpen, setIsVictoryMenuOpen] = useState(false);
   const [gameOver, setGameOver] = useState(false);
-  const [playerHealth, setPlayerHealth] = useState(MAX_HEALTH);
+  const [playerHealth, setPlayerHealth] = useState(INITIAL_MAX_HEALTH);
+  const [playerMaxHealth, setPlayerMaxHealth] = useState(INITIAL_MAX_HEALTH);
   const [playerExp, setPlayerExp] = useState(0);
   const [playerLevel, setPlayerLevel] = useState(INITIAL_PLAYER_LEVEL);
   const [expToNextLevel, setExpToNextLevel] = useState(INITIAL_EXP_TO_NEXT_LEVEL);
+  const [currentUpgradeOptions, setCurrentUpgradeOptions] = useState([]);
+  const [pendingLevelUps, setPendingLevelUps] = useState(0);
+  const [acquiredUpgradeIds, setAcquiredUpgradeIds] = useState([]);
+  const [fireIntervalMs, setFireIntervalMs] = useState(INITIAL_FIRE_INTERVAL_MS);
+  const [bulletDamage, setBulletDamage] = useState(INITIAL_BULLET_DAMAGE);
+  const [bulletSize, setBulletSize] = useState(INITIAL_BULLET_SIZE);
+  const [playerSpeed, setPlayerSpeed] = useState(INITIAL_PLAYER_SPEED);
+  const [expMultiplier, setExpMultiplier] = useState(INITIAL_EXP_MULTIPLIER);
+  const [pickupRadius, setPickupRadius] = useState(INITIAL_PICKUP_RADIUS);
+  const [bulletPierceCount, setBulletPierceCount] = useState(INITIAL_BULLET_PIERCE_COUNT);
+  const [shotCount, setShotCount] = useState(INITIAL_SHOT_COUNT);
   const [finalTime, setFinalTime] = useState(0);
   const [renderedEnemies, setRenderedEnemies] = useState([]);
   const [renderedBullets, setRenderedBullets] = useState([]);
@@ -91,8 +168,25 @@ export default function GameScreen({ navigation }) {
   const isLoopRunningRef = useRef(false);
   const isPlayingRef = useRef(isPlaying);
   const isPausedRef = useRef(isPaused);
+  const isLevelUpMenuOpenRef = useRef(isLevelUpMenuOpen);
+  const hasWonRef = useRef(hasWon);
+  const isVictoryMenuOpenRef = useRef(isVictoryMenuOpen);
   const gameOverRef = useRef(gameOver);
-  const playerHealthRef = useRef(MAX_HEALTH);
+  const playerHealthRef = useRef(INITIAL_MAX_HEALTH);
+  const playerMaxHealthRef = useRef(INITIAL_MAX_HEALTH);
+  const playerExpRef = useRef(0);
+  const playerLevelRef = useRef(INITIAL_PLAYER_LEVEL);
+  const expToNextLevelRef = useRef(INITIAL_EXP_TO_NEXT_LEVEL);
+  const pendingLevelUpsRef = useRef(0);
+  const acquiredUpgradeIdsRef = useRef(new Set());
+  const fireIntervalMsRef = useRef(INITIAL_FIRE_INTERVAL_MS);
+  const bulletDamageRef = useRef(INITIAL_BULLET_DAMAGE);
+  const bulletSizeRef = useRef(INITIAL_BULLET_SIZE);
+  const playerSpeedRef = useRef(INITIAL_PLAYER_SPEED);
+  const expMultiplierRef = useRef(INITIAL_EXP_MULTIPLIER);
+  const pickupRadiusRef = useRef(INITIAL_PICKUP_RADIUS);
+  const bulletPierceCountRef = useRef(INITIAL_BULLET_PIERCE_COUNT);
+  const shotCountRef = useRef(INITIAL_SHOT_COUNT);
   const lastUpdateTimeRef = useRef(Date.now());
   const lastChunkUpdateRef = useRef({ chunkX: null, chunkY: null });
   const frameCountRef = useRef(0);
@@ -106,17 +200,14 @@ export default function GameScreen({ navigation }) {
   const expCrystalIdCounterRef = useRef(0);
   const lastDamageTimeRef = useRef(0);
   const didGameOverRef = useRef(false);
+  const expBarFlashUntilRef = useRef(0);
+  const survivalTimeMsRef = useRef(0);
 
   // Ship properties
   const shipSize = 50;
-  const shipSpeed = 130; // pixels per second
-
   // Chunk properties
   const chunkSize = 1000; // Size of each chunk in world units
   const viewRadius = 1; // How many chunks to keep around player (reduced for performance)
-  const enemySpawnIntervalMs = 1500;
-  const enemyMinSpeed = 70;
-  const enemyMaxSpeed = 90;
   const enemySize = 32;
   const playerCollisionRadius = shipSize * 0.4;
 
@@ -130,23 +221,24 @@ export default function GameScreen({ navigation }) {
     };
   }, [gameAreaLayout.height, gameAreaLayout.width, screenHeight, screenWidth]);
 
-  const createEnemy = useCallback((playerX, playerY) => {
+  const createEnemy = useCallback((playerX, playerY, timeSeconds) => {
     const angle = Math.random() * Math.PI * 2;
     const { spawnRadius } = getEnemySpawnAndDespawnRadii();
-    const speed = enemyMinSpeed + Math.random() * (enemyMaxSpeed - enemyMinSpeed);
+    const speed = getEnemySpeed(timeSeconds);
+    const maxHealth = getEnemyHealth(timeSeconds);
     enemyIdCounterRef.current += 1;
 
     return {
       id: enemyIdCounterRef.current,
       x: playerX + Math.cos(angle) * spawnRadius,
       y: playerY + Math.sin(angle) * spawnRadius,
-      maxHealth: ENEMY_MAX_HEALTH,
-      health: ENEMY_MAX_HEALTH,
+      maxHealth,
+      health: maxHealth,
       flashUntil: 0,
       speed,
       size: enemySize,
     };
-  }, [enemyMaxSpeed, enemyMinSpeed, enemySize, getEnemySpawnAndDespawnRadii]);
+  }, [enemySize, getEnemySpawnAndDespawnRadii]);
 
   const findNearestEnemy = useCallback((playerX, playerY, enemies) => {
     let nearestEnemy = null;
@@ -167,7 +259,7 @@ export default function GameScreen({ navigation }) {
     return nearestEnemy;
   }, []);
 
-  const createBullet = useCallback((playerX, playerY, targetX, targetY) => {
+  const createBullet = useCallback((playerX, playerY, targetX, targetY, angleOffsetDeg = 0, spawnOffset = null) => {
     const dx = targetX - playerX;
     const dy = targetY - playerY;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -177,18 +269,25 @@ export default function GameScreen({ navigation }) {
     }
 
     bulletIdCounterRef.current += 1;
-    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+    const baseAngleRad = Math.atan2(dy, dx);
+    const angleRad = baseAngleRad + (angleOffsetDeg * Math.PI) / 180;
+    const dirX = Math.cos(angleRad);
+    const dirY = Math.sin(angleRad);
+    const angleDeg = angleRad * 180 / Math.PI;
 
     return {
       id: bulletIdCounterRef.current,
-      x: playerX,
-      y: playerY,
-      dirX: dx / distance,
-      dirY: dy / distance,
+      x: spawnOffset ? playerX + spawnOffset.x : playerX,
+      y: spawnOffset ? playerY + spawnOffset.y : playerY,
+      dirX,
+      dirY,
       angleDeg,
-      damage: BULLET_DAMAGE,
+      damage: bulletDamageRef.current,
       speed: BULLET_SPEED,
-      size: BULLET_SIZE,
+      size: bulletSizeRef.current,
+      hitRadius: Math.max(BULLET_ENEMY_HIT_RADIUS, Math.floor(bulletSizeRef.current * 0.35)),
+      remainingPierces: bulletPierceCountRef.current,
+      piercedEnemyIds: new Set(),
       ageMs: 0,
     };
   }, []);
@@ -214,6 +313,170 @@ export default function GameScreen({ navigation }) {
     }
     isLoopRunningRef.current = false;
   }, []);
+
+  const getRandomUpgradeOptions = useCallback((count = 3) => {
+    const pool = UPGRADE_POOL.filter((upgrade) => {
+      if (!upgrade.repeatable && acquiredUpgradeIdsRef.current.has(upgrade.id)) {
+        return false;
+      }
+
+      if (upgrade.exclusiveWith && acquiredUpgradeIdsRef.current.has(upgrade.exclusiveWith)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    for (let i = pool.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
+    const selectedOptions = [];
+    const selectedUpgradeIds = new Set();
+
+    for (let i = 0; i < pool.length && selectedOptions.length < count; i += 1) {
+      const upgrade = pool[i];
+
+      if (selectedUpgradeIds.has(upgrade.id)) {
+        continue;
+      }
+
+      if (upgrade.exclusiveWith && selectedUpgradeIds.has(upgrade.exclusiveWith)) {
+        continue;
+      }
+
+      selectedOptions.push(upgrade);
+      selectedUpgradeIds.add(upgrade.id);
+    }
+
+    return selectedOptions;
+  }, []);
+
+  const openLevelUpMenu = useCallback(() => {
+    setCurrentUpgradeOptions(getRandomUpgradeOptions(3));
+    setIsLevelUpMenuOpen(true);
+  }, [getRandomUpgradeOptions]);
+
+  const addPlayerExp = useCallback((amount) => {
+    if (amount <= 0 || gameOverRef.current) {
+      return;
+    }
+
+    let newExp = playerExpRef.current + amount;
+    let newLevel = playerLevelRef.current;
+    let newRequiredExp = expToNextLevelRef.current;
+    let levelsGained = 0;
+
+    while (newExp >= newRequiredExp) {
+      newExp -= newRequiredExp;
+      newLevel += 1;
+      levelsGained += 1;
+      newRequiredExp = getNextExpRequirement(newRequiredExp);
+      expBarFlashUntilRef.current = Date.now() + EXP_BAR_FLASH_DURATION_MS;
+    }
+
+    playerExpRef.current = newExp;
+    playerLevelRef.current = newLevel;
+    expToNextLevelRef.current = newRequiredExp;
+
+    setPlayerExp(newExp);
+    setPlayerLevel(newLevel);
+    setExpToNextLevel(newRequiredExp);
+    if (levelsGained > 0) {
+      pendingLevelUpsRef.current += levelsGained;
+      setPendingLevelUps(pendingLevelUpsRef.current);
+
+      if (!isLevelUpMenuOpenRef.current) {
+        openLevelUpMenu();
+      }
+    }
+  }, [openLevelUpMenu]);
+
+  const handleSelectUpgrade = useCallback((upgradeId) => {
+    const selectedUpgrade = UPGRADE_POOL.find((upgrade) => upgrade.id === upgradeId);
+
+    switch (upgradeId) {
+      case 'fire_rate': {
+        const nextFireIntervalMs = Math.max(150, Math.floor(fireIntervalMsRef.current * 0.9));
+        fireIntervalMsRef.current = nextFireIntervalMs;
+        setFireIntervalMs(nextFireIntervalMs);
+        break;
+      }
+      case 'damage_up': {
+        const nextBulletDamage = bulletDamageRef.current + 5;
+        bulletDamageRef.current = nextBulletDamage;
+        setBulletDamage(nextBulletDamage);
+        break;
+      }
+      case 'hp_up': {
+        const nextMaxHealth = playerMaxHealthRef.current + 20;
+        const nextHealth = Math.min(playerHealthRef.current + 20, nextMaxHealth);
+        playerMaxHealthRef.current = nextMaxHealth;
+        playerHealthRef.current = nextHealth;
+        setPlayerMaxHealth(nextMaxHealth);
+        setPlayerHealth(nextHealth);
+        break;
+      }
+      case 'move_speed': {
+        const nextPlayerSpeed = playerSpeedRef.current + 20;
+        playerSpeedRef.current = nextPlayerSpeed;
+        setPlayerSpeed(nextPlayerSpeed);
+        break;
+      }
+      case 'exp_worth': {
+        const nextExpMultiplier = expMultiplierRef.current + 0.15;
+        expMultiplierRef.current = nextExpMultiplier;
+        setExpMultiplier(nextExpMultiplier);
+        break;
+      }
+      case 'magnet_size': {
+        const nextPickupRadius = pickupRadiusRef.current + 20;
+        pickupRadiusRef.current = nextPickupRadius;
+        setPickupRadius(nextPickupRadius);
+        break;
+      }
+      case 'piercing': {
+        const nextBulletPierceCount = bulletPierceCountRef.current + 1;
+        bulletPierceCountRef.current = nextBulletPierceCount;
+        setBulletPierceCount(nextBulletPierceCount);
+        break;
+      }
+      case 'double_shot': {
+        shotCountRef.current = 2;
+        setShotCount(2);
+        break;
+      }
+      case 'triple_shot': {
+        shotCountRef.current = 3;
+        setShotCount(3);
+        const slowerFireInterval = Math.max(150, Math.floor(fireIntervalMsRef.current * 1.15));
+        fireIntervalMsRef.current = slowerFireInterval;
+        setFireIntervalMs(slowerFireInterval);
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (selectedUpgrade && !selectedUpgrade.repeatable) {
+      const nextAcquiredUpgradeIds = [...acquiredUpgradeIdsRef.current, selectedUpgrade.id];
+      acquiredUpgradeIdsRef.current = new Set(nextAcquiredUpgradeIds);
+      setAcquiredUpgradeIds(nextAcquiredUpgradeIds);
+    }
+
+    const remainingLevelUps = Math.max(pendingLevelUpsRef.current - 1, 0);
+    pendingLevelUpsRef.current = remainingLevelUps;
+    setPendingLevelUps(remainingLevelUps);
+
+    if (remainingLevelUps > 0) {
+      setCurrentUpgradeOptions(getRandomUpgradeOptions(3));
+      return;
+    }
+
+    setCurrentUpgradeOptions([]);
+    setIsLevelUpMenuOpen(false);
+  }, [getRandomUpgradeOptions]);
 
   const handleGameOver = useCallback(() => {
     if (didGameOverRef.current) {
@@ -247,17 +510,51 @@ export default function GameScreen({ navigation }) {
     enemiesRef.current = [];
     bulletsRef.current = [];
     expCrystalsRef.current = [];
-    playerHealthRef.current = MAX_HEALTH;
+    playerHealthRef.current = INITIAL_MAX_HEALTH;
+    playerMaxHealthRef.current = INITIAL_MAX_HEALTH;
     lastDamageTimeRef.current = 0;
     didGameOverRef.current = false;
+    isLevelUpMenuOpenRef.current = false;
+    hasWonRef.current = false;
+    isVictoryMenuOpenRef.current = false;
     gameOverRef.current = false;
+    pendingLevelUpsRef.current = 0;
+    acquiredUpgradeIdsRef.current = new Set();
+    fireIntervalMsRef.current = INITIAL_FIRE_INTERVAL_MS;
+    bulletDamageRef.current = INITIAL_BULLET_DAMAGE;
+    bulletSizeRef.current = INITIAL_BULLET_SIZE;
+    playerSpeedRef.current = INITIAL_PLAYER_SPEED;
+    expMultiplierRef.current = INITIAL_EXP_MULTIPLIER;
+    pickupRadiusRef.current = INITIAL_PICKUP_RADIUS;
+    bulletPierceCountRef.current = INITIAL_BULLET_PIERCE_COUNT;
+    shotCountRef.current = INITIAL_SHOT_COUNT;
+    expBarFlashUntilRef.current = 0;
+    survivalTimeMsRef.current = 0;
 
     setPlayerWorldPosition({ x: 0, y: 0 });
     setShipRotation(0);
-    setPlayerHealth(MAX_HEALTH);
+    setPlayerHealth(INITIAL_MAX_HEALTH);
+    setPlayerMaxHealth(INITIAL_MAX_HEALTH);
+    playerExpRef.current = 0;
+    playerLevelRef.current = INITIAL_PLAYER_LEVEL;
+    expToNextLevelRef.current = INITIAL_EXP_TO_NEXT_LEVEL;
     setPlayerExp(0);
     setPlayerLevel(INITIAL_PLAYER_LEVEL);
     setExpToNextLevel(INITIAL_EXP_TO_NEXT_LEVEL);
+    setPendingLevelUps(0);
+    setAcquiredUpgradeIds([]);
+    setFireIntervalMs(INITIAL_FIRE_INTERVAL_MS);
+    setBulletDamage(INITIAL_BULLET_DAMAGE);
+    setBulletSize(INITIAL_BULLET_SIZE);
+    setPlayerSpeed(INITIAL_PLAYER_SPEED);
+    setExpMultiplier(INITIAL_EXP_MULTIPLIER);
+    setPickupRadius(INITIAL_PICKUP_RADIUS);
+    setBulletPierceCount(INITIAL_BULLET_PIERCE_COUNT);
+    setShotCount(INITIAL_SHOT_COUNT);
+    setIsLevelUpMenuOpen(false);
+    setHasWon(false);
+    setIsVictoryMenuOpen(false);
+    setCurrentUpgradeOptions([]);
     setRenderedEnemies([]);
     setRenderedBullets([]);
     setRenderedExpCrystals([]);
@@ -282,16 +579,50 @@ export default function GameScreen({ navigation }) {
   useEffect(() => {
     isPlayingRef.current = isPlaying;
     isPausedRef.current = isPaused;
+    isLevelUpMenuOpenRef.current = isLevelUpMenuOpen;
+    hasWonRef.current = hasWon;
+    isVictoryMenuOpenRef.current = isVictoryMenuOpen;
     gameOverRef.current = gameOver;
-  }, [isPlaying, isPaused, gameOver]);
+  }, [gameOver, hasWon, isLevelUpMenuOpen, isPaused, isPlaying, isVictoryMenuOpen]);
 
   useEffect(() => {
     playerHealthRef.current = playerHealth;
-  }, [playerHealth]);
+    playerMaxHealthRef.current = playerMaxHealth;
+  }, [playerHealth, playerMaxHealth]);
+
+  useEffect(() => {
+    playerExpRef.current = playerExp;
+    playerLevelRef.current = playerLevel;
+    expToNextLevelRef.current = expToNextLevel;
+    pendingLevelUpsRef.current = pendingLevelUps;
+    acquiredUpgradeIdsRef.current = new Set(acquiredUpgradeIds);
+    fireIntervalMsRef.current = fireIntervalMs;
+    bulletDamageRef.current = bulletDamage;
+    bulletSizeRef.current = bulletSize;
+    playerSpeedRef.current = playerSpeed;
+    expMultiplierRef.current = expMultiplier;
+    pickupRadiusRef.current = pickupRadius;
+    bulletPierceCountRef.current = bulletPierceCount;
+    shotCountRef.current = shotCount;
+  }, [
+    acquiredUpgradeIds,
+    bulletDamage,
+    bulletPierceCount,
+    bulletSize,
+    expMultiplier,
+    expToNextLevel,
+    fireIntervalMs,
+    pendingLevelUps,
+    pickupRadius,
+    playerExp,
+    playerLevel,
+    playerSpeed,
+    shotCount,
+  ]);
 
   // Joystick handlers
   const handleJoystickMove = useCallback((normalizedX, normalizedY) => {
-    if (!isPlayingRef.current || isPausedRef.current || gameOverRef.current) {
+    if (!isPlayingRef.current || isPausedRef.current || isVictoryMenuOpenRef.current || gameOverRef.current) {
       return;
     }
     joystickInputRef.current = { x: normalizedX, y: normalizedY };
@@ -302,7 +633,7 @@ export default function GameScreen({ navigation }) {
   }, []);
 
   const togglePause = useCallback(() => {
-    if (gameOver || !isPlaying) {
+    if (gameOver || !isPlaying || isLevelUpMenuOpen || isVictoryMenuOpen) {
       return;
     }
 
@@ -313,20 +644,22 @@ export default function GameScreen({ navigation }) {
       }
       return nextPaused;
     });
-  }, [gameOver, isPlaying]);
+  }, [gameOver, isLevelUpMenuOpen, isPlaying, isVictoryMenuOpen]);
 
   const resumeGame = useCallback(() => {
-    if (gameOver || !isPlaying) {
+    if (gameOver || !isPlaying || isLevelUpMenuOpen || isVictoryMenuOpen) {
       return;
     }
     joystickInputRef.current = { x: 0, y: 0 };
     setIsPaused(false);
-  }, [gameOver, isPlaying]);
+  }, [gameOver, isLevelUpMenuOpen, isPlaying, isVictoryMenuOpen]);
 
   const restartGame = useCallback(() => {
     stopGameLoop();
     joystickInputRef.current = { x: 0, y: 0 };
     setIsPaused(false);
+    setHasWon(false);
+    setIsVictoryMenuOpen(false);
     setGameOver(false);
     setFinalTime(0);
     resetRunState();
@@ -352,6 +685,8 @@ export default function GameScreen({ navigation }) {
     joystickInputRef.current = { x: 0, y: 0 };
     setIsPaused(false);
     setIsPlaying(false);
+    setHasWon(false);
+    setIsVictoryMenuOpen(false);
     setGameOver(false);
     setFinalTime(0);
     resetRunState();
@@ -362,9 +697,21 @@ export default function GameScreen({ navigation }) {
     });
   }, [navigation, resetRunState, stopGameLoop]);
 
+  const handleContinueEndless = useCallback(() => {
+    joystickInputRef.current = { x: 0, y: 0 };
+    isVictoryMenuOpenRef.current = false;
+    setIsVictoryMenuOpen(false);
+  }, []);
+
+  const handleExitAfterVictory = useCallback(() => {
+    isVictoryMenuOpenRef.current = false;
+    setIsVictoryMenuOpen(false);
+    handleExitToMenu();
+  }, [handleExitToMenu]);
+
   // Game loop
   useEffect(() => {
-    if (!isPlaying || isPaused || gameOver) {
+    if (!isPlaying || isPaused || isLevelUpMenuOpen || isVictoryMenuOpen || gameOver) {
       stopGameLoop();
       return;
     }
@@ -378,7 +725,7 @@ export default function GameScreen({ navigation }) {
     lastUpdateTimeRef.current = null;
 
     const gameLoop = (timestamp) => {
-      if (!isPlayingRef.current || isPausedRef.current || gameOverRef.current) {
+      if (!isPlayingRef.current || isPausedRef.current || isLevelUpMenuOpenRef.current || isVictoryMenuOpenRef.current || gameOverRef.current) {
         stopGameLoop();
         return;
       }
@@ -391,6 +738,17 @@ export default function GameScreen({ navigation }) {
       const deltaTime = now - lastUpdateTimeRef.current;
       lastUpdateTimeRef.current = now;
       const dt = Math.min(deltaTime / 1000, 0.05); // Clamp to avoid large jumps after stalls
+      survivalTimeMsRef.current += deltaTime;
+
+      if (!hasWonRef.current && survivalTimeMsRef.current >= VICTORY_TIME_MS) {
+        hasWonRef.current = true;
+        isVictoryMenuOpenRef.current = true;
+        joystickInputRef.current = { x: 0, y: 0 };
+        setHasWon(true);
+        setIsVictoryMenuOpen(true);
+        stopGameLoop();
+        return;
+      }
 
       // Store previous position before applying movement
       previousWorldPositionRef.current = {
@@ -403,8 +761,8 @@ export default function GameScreen({ navigation }) {
       // Update player world position based on joystick input
       if (joystickInput.x !== 0 || joystickInput.y !== 0) {
         // Time-based movement (frame-rate independent)
-        const moveX = joystickInput.x * shipSpeed * dt;
-        const moveY = joystickInput.y * shipSpeed * dt;
+        const moveX = joystickInput.x * playerSpeedRef.current * dt;
+        const moveY = joystickInput.y * playerSpeedRef.current * dt;
 
         // Update world position (no boundaries - infinite space!)
         playerWorldPositionRef.current.x += moveX;
@@ -459,27 +817,60 @@ export default function GameScreen({ navigation }) {
       // Enemy spawn/update/despawn
       const playerX = playerWorldPositionRef.current.x;
       const playerY = playerWorldPositionRef.current.y;
+      const survivalTimeSeconds = survivalTimeMsRef.current / 1000;
       const { despawnRadius } = getEnemySpawnAndDespawnRadii();
       const despawnRadiusSq = despawnRadius * despawnRadius;
+      const currentSpawnIntervalMs = getSpawnInterval(survivalTimeSeconds);
 
       enemySpawnAccumulatorRef.current += deltaTime;
-      while (enemySpawnAccumulatorRef.current >= enemySpawnIntervalMs) {
-        enemySpawnAccumulatorRef.current -= enemySpawnIntervalMs;
-        enemiesRef.current.push(createEnemy(playerX, playerY));
+      while (enemySpawnAccumulatorRef.current >= currentSpawnIntervalMs) {
+        enemySpawnAccumulatorRef.current -= currentSpawnIntervalMs;
+        enemiesRef.current.push(createEnemy(playerX, playerY, survivalTimeSeconds));
       }
 
       fireAccumulatorRef.current += deltaTime;
-      while (fireAccumulatorRef.current >= FIRE_INTERVAL_MS) {
-        fireAccumulatorRef.current -= FIRE_INTERVAL_MS;
+      while (fireAccumulatorRef.current >= fireIntervalMsRef.current) {
+        fireAccumulatorRef.current -= fireIntervalMsRef.current;
 
         const nearestEnemy = findNearestEnemy(playerX, playerY, enemiesRef.current);
         if (!nearestEnemy) {
           continue;
         }
 
-        const bullet = createBullet(playerX, playerY, nearestEnemy.x, nearestEnemy.y);
-        if (bullet) {
-          bulletsRef.current.push(bullet);
+        if (shotCountRef.current === 2) {
+          const dx = nearestEnemy.x - playerX;
+          const dy = nearestEnemy.y - playerY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance > 0.0001) {
+            const dirX = dx / distance;
+            const dirY = dy / distance;
+            const perpendicularX = -dirY;
+            const perpendicularY = dirX;
+            const spawnOffsets = [
+              { x: perpendicularX * DOUBLE_SHOT_SPAWN_OFFSET, y: perpendicularY * DOUBLE_SHOT_SPAWN_OFFSET },
+              { x: -perpendicularX * DOUBLE_SHOT_SPAWN_OFFSET, y: -perpendicularY * DOUBLE_SHOT_SPAWN_OFFSET },
+            ];
+
+            for (let i = 0; i < spawnOffsets.length; i += 1) {
+              const bullet = createBullet(playerX, playerY, nearestEnemy.x, nearestEnemy.y, 0, spawnOffsets[i]);
+              if (bullet) {
+                bulletsRef.current.push(bullet);
+              }
+            }
+          }
+        } else {
+          const shotOffsets =
+            shotCountRef.current === 3
+              ? [-TRIPLE_SHOT_ANGLE_OFFSET_DEG, 0, TRIPLE_SHOT_ANGLE_OFFSET_DEG]
+              : [0];
+
+          for (let i = 0; i < shotOffsets.length; i += 1) {
+            const bullet = createBullet(playerX, playerY, nearestEnemy.x, nearestEnemy.y, shotOffsets[i]);
+            if (bullet) {
+              bulletsRef.current.push(bullet);
+            }
+          }
         }
       }
 
@@ -567,10 +958,11 @@ export default function GameScreen({ navigation }) {
           }
 
           if (
+            !bullet.piercedEnemyIds.has(enemy.id) &&
             isColliding(
               bullet.x,
               bullet.y,
-              BULLET_ENEMY_HIT_RADIUS,
+              bullet.hitRadius,
               enemy.x,
               enemy.y,
               ENEMY_BULLET_HIT_RADIUS
@@ -578,7 +970,13 @@ export default function GameScreen({ navigation }) {
           ) {
             enemy.health -= bullet.damage;
             enemy.flashUntil = Date.now() + ENEMY_FLASH_DURATION_MS;
-            bulletsToRemove.add(bullet.id);
+            bullet.piercedEnemyIds.add(enemy.id);
+
+            if (bullet.remainingPierces > 0) {
+              bullet.remainingPierces -= 1;
+            } else {
+              bulletsToRemove.add(bullet.id);
+            }
 
             if (enemy.health <= 0) {
               expCrystalsRef.current.push(createExpCrystal(enemy.x, enemy.y));
@@ -602,7 +1000,7 @@ export default function GameScreen({ navigation }) {
             isColliding(
               playerX,
               playerY,
-              PLAYER_PICKUP_RADIUS,
+              pickupRadiusRef.current,
               crystal.x,
               crystal.y,
               EXP_CRYSTAL_PICKUP_RADIUS
@@ -618,7 +1016,7 @@ export default function GameScreen({ navigation }) {
           const distanceSq = dx * dx + dy * dy;
 
           if (distanceSq <= CRYSTAL_COLLECT_COMPLETE_RADIUS * CRYSTAL_COLLECT_COMPLETE_RADIUS) {
-            expGainedThisFrame += crystal.value;
+            expGainedThisFrame += Math.max(1, Math.round(crystal.value * expMultiplierRef.current));
             continue;
           }
 
@@ -636,7 +1034,7 @@ export default function GameScreen({ navigation }) {
 
       expCrystalsRef.current = nextExpCrystals;
       if (expGainedThisFrame > 0) {
-        setPlayerExp((prevExp) => prevExp + expGainedThisFrame);
+        addPlayerExp(expGainedThisFrame);
       }
 
       // Render uses latest world position each frame
@@ -664,20 +1062,21 @@ export default function GameScreen({ navigation }) {
       stopGameLoop();
     };
   }, [
+    addPlayerExp,
     createBullet,
     createEnemy,
     createExpCrystal,
     findNearestEnemy,
     handleGameOver,
-    enemySpawnIntervalMs,
     gameOver,
     getEnemySpawnAndDespawnRadii,
     gameAreaLayout.height,
     gameAreaLayout.width,
+    isLevelUpMenuOpen,
     isPaused,
     isPlaying,
+    isVictoryMenuOpen,
     playerCollisionRadius,
-    shipSpeed,
     stopGameLoop,
   ]);
 
@@ -714,13 +1113,34 @@ export default function GameScreen({ navigation }) {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const healthRatio = Math.max(0, Math.min(playerHealth / MAX_HEALTH, 1));
+  const healthRatio = Math.max(0, Math.min(playerHealth / playerMaxHealth, 1));
   const healthBarColor = healthRatio > 0.6 ? '#63d471' : healthRatio > 0.3 ? '#f6a83b' : '#d63f3f';
+  const expProgressRatio = Math.max(0, Math.min(playerExp / expToNextLevel, 1));
   const now = Date.now();
+  const isExpBarFlashing = now < expBarFlashUntilRef.current;
+  const shouldShowExpBarFlash = isExpBarFlashing && Math.floor(now / BLINK_INTERVAL_MS) % 2 === 0;
   const playerFlashUntil = lastDamageTimeRef.current + PLAYER_FLASH_DURATION_MS;
   const isPlayerFlashing = now < playerFlashUntil;
   const shouldShowPlayerFlash = isPlayerFlashing && Math.floor(now / BLINK_INTERVAL_MS) % 2 === 0;
   const playerShipTransform = [{ rotate: `${shipRotation}rad` }];
+  const getUpgradeCurrentValue = useCallback((upgradeId) => {
+    switch (upgradeId) {
+      case 'damage_up':
+        return `Current: ${bulletDamage} damage`;
+      case 'fire_rate':
+        return `Current: ${fireIntervalMs} ms`;
+      case 'hp_up':
+        return `Current: ${playerMaxHealth} max HP`;
+      case 'move_speed':
+        return `Current: ${playerSpeed} speed`;
+      case 'exp_worth':
+        return `Current: +${Math.round((expMultiplier - 1) * 100)}% EXP`;
+      case 'magnet_size':
+        return `Current: ${pickupRadius} radius`;
+      default:
+        return null;
+    }
+  }, [bulletDamage, expMultiplier, fireIntervalMs, pickupRadius, playerMaxHealth, playerSpeed]);
 
   return (
     <SafeAreaView style={styles.screenContainer} edges={['top', 'bottom']}>
@@ -771,24 +1191,28 @@ export default function GameScreen({ navigation }) {
           );
         })}
 
-        {renderedBullets.map((bullet) => (
-          <Image
-            key={bullet.id}
-            source={spaceshipShootingSprite}
-            pointerEvents="none"
-            style={[
-              styles.bullet,
-              {
-                width: BULLET_RENDER_SIZE,
-                height: BULLET_RENDER_SIZE,
-                left: bullet.x - worldOffsetX - BULLET_RENDER_SIZE / 2,
-                top: bullet.y - worldOffsetY - BULLET_RENDER_SIZE / 2,
-                transform: [{ rotate: `${bullet.angleDeg + BULLET_SPRITE_ROTATION_OFFSET_DEG}deg` }],
-              },
-            ]}
-            resizeMode="contain"
-          />
-        ))}
+        {renderedBullets.map((bullet) => {
+          const renderSize = BULLET_RENDER_SIZE * (bullet.size / INITIAL_BULLET_SIZE);
+
+          return (
+            <Image
+              key={bullet.id}
+              source={spaceshipShootingSprite}
+              pointerEvents="none"
+              style={[
+                styles.bullet,
+                {
+                  width: renderSize,
+                  height: renderSize,
+                  left: bullet.x - worldOffsetX - renderSize / 2,
+                  top: bullet.y - worldOffsetY - renderSize / 2,
+                  transform: [{ rotate: `${bullet.angleDeg + BULLET_SPRITE_ROTATION_OFFSET_DEG}deg` }],
+                },
+              ]}
+              resizeMode="contain"
+            />
+          );
+        })}
 
         {renderedExpCrystals.map((crystal) => (
           <Image
@@ -838,8 +1262,8 @@ export default function GameScreen({ navigation }) {
           {/* Game Timer */}
           <GameTimer
             isPlaying={isPlaying && !gameOver}
-            isPaused={isPaused}
-            dimmed={isPaused}
+            isPaused={isPaused || isLevelUpMenuOpen || isVictoryMenuOpen}
+            dimmed={isPaused || isLevelUpMenuOpen || isVictoryMenuOpen}
             onGameEnd={(finalTimeMs) => {
               setFinalTime(finalTimeMs);
               console.log('Game ended with time:', finalTimeMs);
@@ -847,8 +1271,22 @@ export default function GameScreen({ navigation }) {
           />
 
           {!gameOver && (
-            <View style={[styles.healthHud, isPaused && styles.healthHudDimmed, { top: 2, left: 20 }]}>
-              <Text style={[styles.healthLabel, isPaused && styles.healthTextDimmed]}>HP</Text>
+            <View style={[styles.expHud, (isPaused || isLevelUpMenuOpen || isVictoryMenuOpen) && styles.expHudDimmed, { top: 54, left: 20 }]}>
+              <View style={styles.expBarTrack}>
+                <View style={[styles.expBarFill, { width: `${expProgressRatio * 100}%` }]} />
+                {shouldShowExpBarFlash && <View style={styles.expBarFlashOverlay} pointerEvents="none" />}
+              </View>
+            </View>
+          )}
+
+          {!gameOver && (
+            <View style={[styles.healthHud, (isPaused || isLevelUpMenuOpen || isVictoryMenuOpen) && styles.healthHudDimmed, { top: 2, left: 20 }]}>
+              <View style={styles.hpHeaderRow}>
+                <Text style={[styles.healthLabel, (isPaused || isLevelUpMenuOpen || isVictoryMenuOpen) && styles.healthTextDimmed]}>HP</Text>
+                <Text style={[styles.healthValueText, (isPaused || isLevelUpMenuOpen || isVictoryMenuOpen) && styles.healthTextDimmed]}>
+                  {playerHealth} / {playerMaxHealth}
+                </Text>
+              </View>
               <View style={styles.healthBarTrack}>
                 <View
                   style={[
@@ -857,16 +1295,13 @@ export default function GameScreen({ navigation }) {
                   ]}
                 />
               </View>
-              <Text style={[styles.healthValueText, isPaused && styles.healthTextDimmed]}>
-                {playerHealth} / {MAX_HEALTH}
-              </Text>
             </View>
           )}
 
           {/* Joystick */}
           <Joystick onMove={handleJoystickMove} onRelease={handleJoystickRelease} />
 
-          {isPaused && !gameOver && (
+          {isPaused && !isLevelUpMenuOpen && !isVictoryMenuOpen && !gameOver && (
             <View style={styles.pauseOverlay}>
               <View style={styles.pausePanel}>
                 <Text style={styles.pauseTitle}>Paused</Text>
@@ -878,6 +1313,52 @@ export default function GameScreen({ navigation }) {
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.pauseSecondaryButton} onPress={handleExitToMenu} activeOpacity={0.8}>
                   <Text style={styles.pauseSecondaryButtonText}>Main Menu</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {isLevelUpMenuOpen && !isVictoryMenuOpen && !gameOver && (
+            <View style={styles.levelUpOverlay}>
+              <View style={styles.levelUpPanel}>
+                <Text style={styles.levelUpBigText}>LEVEL UP!</Text>
+                <Text style={styles.levelNumberText}>Level {playerLevel}</Text>
+                <Text style={styles.levelUpTitle}>Choose an Upgrade</Text>
+                <View style={styles.upgradeRow}>
+                {currentUpgradeOptions.map((option) => (
+                  <TouchableOpacity
+                      key={option.id}
+                      style={styles.upgradeCard}
+                      onPress={() => handleSelectUpgrade(option.id)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.upgradeTitle}>{option.title}</Text>
+                    <Text style={styles.upgradeDescription}>{option.description}</Text>
+                    {getUpgradeCurrentValue(option.id) && (
+                      <Text style={styles.upgradeCurrentValue}>{getUpgradeCurrentValue(option.id)}</Text>
+                    )}
+                    <View style={styles.upgradeBadge}>
+                      <Text style={styles.upgradeBadgeText}>
+                        {option.repeatable ? 'STACKABLE' : 'UNIQUE'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              </View>
+            </View>
+          )}
+
+          {isVictoryMenuOpen && !gameOver && (
+            <View style={styles.victoryOverlay}>
+              <View style={styles.victoryPanel}>
+                <Text style={styles.victoryTitle}>Victory!</Text>
+                <Text style={styles.victoryMessage}>You survived 20 minutes</Text>
+                <TouchableOpacity style={styles.pausePrimaryButton} onPress={handleContinueEndless} activeOpacity={0.8}>
+                  <Text style={styles.pausePrimaryButtonText}>Endless</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.pauseSecondaryButton} onPress={handleExitAfterVictory} activeOpacity={0.8}>
+                  <Text style={styles.pauseSecondaryButtonText}>Exit</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -898,7 +1379,7 @@ export default function GameScreen({ navigation }) {
             </View>
           )}
 
-          {isPlaying && !gameOver && (
+          {isPlaying && !gameOver && !isLevelUpMenuOpen && !isVictoryMenuOpen && (
             <TouchableOpacity
               style={[styles.pauseToggleButton, { top: insets.top + 8 }]}
               onPress={togglePause}
@@ -952,6 +1433,124 @@ const styles = StyleSheet.create({
     tintColor: '#ffffff',
     opacity: 0.5,
   },
+  expHud: {
+    position: 'absolute',
+    alignItems: 'flex-start',
+    zIndex: 10,
+  },
+  expHudDimmed: {
+    opacity: 0.45,
+  },
+  expBarTrack: {
+    width: EXP_BAR_WIDTH,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  expBarFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#4db8ff',
+  },
+  expBarFlashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#ffffff',
+    opacity: 0.5,
+    borderRadius: 999,
+  },
+  levelUpOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 35,
+  },
+  levelUpPanel: {
+    width: '92%',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(10, 18, 32, 0.96)',
+    borderWidth: 2,
+    borderColor: '#9ad6ff',
+  },
+  levelUpBigText: {
+    color: '#ffe082',
+    fontSize: 28,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 4,
+    letterSpacing: 1.5,
+  },
+  levelNumberText: {
+    color: '#d9f0ff',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  levelUpTitle: {
+    color: '#f6e7c1',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
+  upgradeRow: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+  },
+  upgradeCard: {
+    flex: 1,
+    backgroundColor: '#101522',
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#283a63',
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    marginHorizontal: 4,
+    minHeight: 130,
+    justifyContent: 'center',
+  },
+  upgradeTitle: {
+    color: '#f6e7c1',
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  upgradeDescription: {
+    color: '#9fb5de',
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  upgradeCurrentValue: {
+    color: 'rgba(246, 231, 193, 0.72)',
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  upgradeBadge: {
+    marginTop: 6,
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  upgradeBadgeText: {
+    color: 'rgba(246, 231, 193, 0.8)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
   uiOverlay: {
     position: 'absolute',
     top: 0,
@@ -964,19 +1563,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'flex-start',
     zIndex: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
     backgroundColor: 'transparent',
   },
   healthHudDimmed: {
     opacity: 0.45,
   },
+  hpHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   healthLabel: {
     color: '#f6e7c1',
     fontSize: 12,
     fontWeight: '900',
-    marginBottom: 4,
     letterSpacing: 1,
   },
   healthBarTrack: {
@@ -996,7 +1596,7 @@ const styles = StyleSheet.create({
     color: '#f6e7c1',
     fontSize: 12,
     fontWeight: '900',
-    marginTop: 4,
+    marginLeft: 8,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 2, height: 2 },
     textShadowRadius: 2,
@@ -1011,6 +1611,37 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 20,
+  },
+  victoryOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 32,
+  },
+  victoryPanel: {
+    width: 260,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    backgroundColor: 'rgba(10, 18, 32, 0.95)',
+    borderWidth: 2,
+    borderColor: '#f6a83b',
+    alignItems: 'center',
+  },
+  victoryTitle: {
+    color: '#f6e7c1',
+    fontSize: 30,
+    fontWeight: '900',
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  victoryMessage: {
+    color: '#f6e7c1',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 20,
+    textAlign: 'center',
   },
   pausePanel: {
     width: 240,
