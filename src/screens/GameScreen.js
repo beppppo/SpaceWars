@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Image, Vibration } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import SpaceChunk from '../components/SpaceChunk';
 import Joystick from '../components/Joystick';
@@ -33,8 +33,27 @@ const ENEMY_COLLISION_RADIUS = 16;
 const BULLET_COLLISION_RADIUS = 6;
 const BULLET_ENEMY_HIT_RADIUS = 3;
 const ENEMY_BULLET_HIT_RADIUS = 12;
+const HEALTH_DROP_CHANCE = 0.005;
+const HEALTH_DROP_HEAL_AMOUNT = 50;
+const MAX_HEALTH_DROPS = 5;
+const HEALTH_DROP_LIFETIME = 24000;
+const HEALTH_DROP_PICKUP_RADIUS = 18;
+const HEALTH_DROP_SIZE = 18;
+const MAGNET_DROP_CHANCE = 0.002;
+const MAX_MAGNET_DROPS = 2;
+const MAGNET_DROP_LIFETIME = 24000;
+const MAGNET_DROP_ATTRACTION_RADIUS = 24;
+const MAGNET_DROP_COLLECT_RADIUS = 10;
+const MAGNET_DROP_SIZE = 20;
 const EXP_CRYSTAL_VALUE = 10;
 const EXP_CRYSTAL_SIZE = 16;
+const EXP_CRYSTAL_MERGE_RADIUS = 40;
+const EXP_CRYSTAL_MEDIUM_COUNT_THRESHOLD = 60;
+const EXP_CRYSTAL_HIGH_COUNT_THRESHOLD = 90;
+const EXP_CRYSTAL_MEDIUM_COUNT_MERGE_RADIUS = 55;
+const EXP_CRYSTAL_HIGH_COUNT_MERGE_RADIUS = 70;
+const EXP_CRYSTAL_MERGE_INTERVAL_MS = 750;
+const CRYSTAL_RENDER_MARGIN = 80;
 const INITIAL_PLAYER_LEVEL = 1;
 const INITIAL_EXP_TO_NEXT_LEVEL = 100;
 const INITIAL_PICKUP_RADIUS = 28;
@@ -43,12 +62,13 @@ const CRYSTAL_COLLECT_SPEED = 400;
 const CRYSTAL_COLLECT_COMPLETE_RADIUS = 8;
 const EXP_BAR_WIDTH = 160;
 const EXP_BAR_FLASH_DURATION_MS = 700;
+const RENDER_SYNC_INTERVAL_MS = 33;
 const INITIAL_EXP_MULTIPLIER = 1;
-const INITIAL_BULLET_PIERCE_COUNT = 0;
+const INITIAL_BULLET_PIERCE_COUNT = 1;
 const INITIAL_SHOT_COUNT = 1;
-// Victory condition (20 minutes)
+// Victory condition (10 minutes)
 // For testing you can temporarily change to something like 10000 (10s)
-const VICTORY_TIME_MS = 20 * 60 * 1000;
+const VICTORY_TIME_MS = 10 * 60 * 1000;
 const DOUBLE_SHOT_SPAWN_OFFSET = 8;
 const DOUBLE_SHOT_ANGLE_OFFSET_DEG = 8;
 const TRIPLE_SHOT_ANGLE_OFFSET_DEG = 12;
@@ -63,8 +83,8 @@ const UPGRADE_POOL = [
   {
     id: 'piercing',
     title: 'Piercing Rounds',
-    description: 'Bullets pass through 1 additional enemy',
-    repeatable: false,
+    description: '+1 bullet piercing',
+    repeatable: true,
   },
   {
     id: 'double_shot',
@@ -137,7 +157,19 @@ function getSpawnMargin(timeSeconds) {
   return 180;
 }
 
-export default function GameScreen({ navigation }) {
+function getExpCrystalMergeRadius(crystalCount) {
+  if (crystalCount > EXP_CRYSTAL_HIGH_COUNT_THRESHOLD) {
+    return EXP_CRYSTAL_HIGH_COUNT_MERGE_RADIUS;
+  }
+
+  if (crystalCount > EXP_CRYSTAL_MEDIUM_COUNT_THRESHOLD) {
+    return EXP_CRYSTAL_MEDIUM_COUNT_MERGE_RADIUS;
+  }
+
+  return EXP_CRYSTAL_MERGE_RADIUS;
+}
+
+export default function GameScreen({ navigation, vibrationEnabled = true, showFpsEnabled = true }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [isPlaying, setIsPlaying] = useState(true);
@@ -163,9 +195,8 @@ export default function GameScreen({ navigation }) {
   const [bulletPierceCount, setBulletPierceCount] = useState(INITIAL_BULLET_PIERCE_COUNT);
   const [shotCount, setShotCount] = useState(INITIAL_SHOT_COUNT);
   const [finalTime, setFinalTime] = useState(0);
-  const [renderedEnemies, setRenderedEnemies] = useState([]);
-  const [renderedBullets, setRenderedBullets] = useState([]);
-  const [renderedExpCrystals, setRenderedExpCrystals] = useState([]);
+  const [fps, setFps] = useState(0);
+  const [, setRenderTick] = useState(0);
 
   // World and chunk management
   const chunkManagerRef = useRef(null);
@@ -174,9 +205,8 @@ export default function GameScreen({ navigation }) {
   // Game area dimensions (measured from actual layout)
   const [gameAreaLayout, setGameAreaLayout] = useState({ width: screenWidth, height: screenHeight });
 
-  // Player world position (infinite space coordinates) - use refs to avoid state updates
+  // Player world position (infinite space coordinates) - simulation stays in refs
   const playerWorldPositionRef = useRef({ x: 0, y: 0 });
-  const [, setPlayerWorldPosition] = useState({ x: 0, y: 0 });
 
   // For interpolation
   const previousWorldPositionRef = useRef({ x: 0, y: 0 });
@@ -189,7 +219,6 @@ export default function GameScreen({ navigation }) {
   };
 
   const shipRotationRef = useRef(0);
-  const [shipRotation, setShipRotation] = useState(0); // Rotation angle in radians
   const joystickInputRef = useRef({ x: 0, y: 0 }); // Normalized joystick input (-1 to 1)
   const animationFrameRef = useRef(null);
   const restartFrameRef = useRef(null);
@@ -217,15 +246,22 @@ export default function GameScreen({ navigation }) {
   const shotCountRef = useRef(INITIAL_SHOT_COUNT);
   const lastUpdateTimeRef = useRef(Date.now());
   const lastChunkUpdateRef = useRef({ chunkX: null, chunkY: null });
-  const frameCountRef = useRef(0);
+  const lastRenderSyncTimeRef = useRef(0);
   const enemiesRef = useRef([]);
   const bulletsRef = useRef([]);
   const expCrystalsRef = useRef([]);
+  const healthDropsRef = useRef([]);
+  const magnetDropsRef = useRef([]);
   const enemySpawnAccumulatorRef = useRef(0);
   const fireAccumulatorRef = useRef(0);
   const enemyIdCounterRef = useRef(0);
   const bulletIdCounterRef = useRef(0);
   const expCrystalIdCounterRef = useRef(0);
+  const healthDropIdCounterRef = useRef(0);
+  const magnetDropIdCounterRef = useRef(0);
+  const fpsFrameCountRef = useRef(0);
+  const lastFpsUpdateTimeRef = useRef(0);
+  const lastCrystalMergeTimeRef = useRef(0);
   const lastDamageTimeRef = useRef(0);
   const didGameOverRef = useRef(false);
   const expBarFlashUntilRef = useRef(0);
@@ -317,7 +353,8 @@ export default function GameScreen({ navigation }) {
       speed: BULLET_SPEED,
       size: bulletSizeRef.current,
       hitRadius: Math.max(BULLET_ENEMY_HIT_RADIUS, Math.floor(bulletSizeRef.current * 0.35)),
-      remainingPierces: bulletPierceCountRef.current,
+      maxPierces: bulletPierceCountRef.current,
+      hitCount: 0,
       piercedEnemyIds: new Set(),
       ageMs: 0,
     };
@@ -335,6 +372,167 @@ export default function GameScreen({ navigation }) {
       isCollecting: false,
       collectSpeed: CRYSTAL_COLLECT_SPEED,
     };
+  }, []);
+
+  const createHealthDrop = useCallback((x, y) => {
+    healthDropIdCounterRef.current += 1;
+
+    return {
+      id: healthDropIdCounterRef.current,
+      x,
+      y,
+      size: HEALTH_DROP_SIZE,
+      isCollecting: false,
+      collectSpeed: CRYSTAL_COLLECT_SPEED,
+      ageMs: 0,
+    };
+  }, []);
+
+  const trySpawnHealthDrop = useCallback((x, y) => {
+    if (playerHealthRef.current >= playerMaxHealthRef.current) {
+      return null;
+    }
+
+    if (healthDropsRef.current.length >= MAX_HEALTH_DROPS) {
+      return null;
+    }
+
+    if (Math.random() > HEALTH_DROP_CHANCE) {
+      return null;
+    }
+
+    const healthDrop = createHealthDrop(x, y);
+    healthDropsRef.current.push(healthDrop);
+    return healthDrop;
+  }, [createHealthDrop]);
+
+  const createMagnetDrop = useCallback((x, y) => {
+    magnetDropIdCounterRef.current += 1;
+
+    return {
+      id: magnetDropIdCounterRef.current,
+      x,
+      y,
+      size: MAGNET_DROP_SIZE,
+      isCollecting: false,
+      collectSpeed: CRYSTAL_COLLECT_SPEED,
+      ageMs: 0,
+    };
+  }, []);
+
+  const trySpawnMagnetDrop = useCallback((x, y) => {
+    if (magnetDropsRef.current.length >= MAX_MAGNET_DROPS) {
+      return null;
+    }
+
+    if (Math.random() > MAGNET_DROP_CHANCE) {
+      return null;
+    }
+
+    const magnetDrop = createMagnetDrop(x, y);
+    magnetDropsRef.current.push(magnetDrop);
+    return magnetDrop;
+  }, [createMagnetDrop]);
+
+  const activateMagnetEffect = useCallback(() => {
+    const crystals = expCrystalsRef.current;
+
+    for (let i = 0; i < crystals.length; i += 1) {
+      const crystal = crystals[i];
+      if (crystal.isCollecting) {
+        continue;
+      }
+
+      crystal.isCollecting = true;
+    }
+  }, []);
+
+  const addExpCrystal = useCallback((x, y, value = EXP_CRYSTAL_VALUE) => {
+    const crystals = expCrystalsRef.current;
+    const mergeRadius = getExpCrystalMergeRadius(crystals.length);
+    const mergeRadiusSq = mergeRadius * mergeRadius;
+    let nearestCrystal = null;
+    let nearestDistanceSq = Infinity;
+
+    for (let i = 0; i < crystals.length; i += 1) {
+      const crystal = crystals[i];
+      if (crystal.isCollecting) {
+        continue;
+      }
+
+      const dx = crystal.x - x;
+      const dy = crystal.y - y;
+      const distanceSq = dx * dx + dy * dy;
+
+      if (distanceSq <= mergeRadiusSq && distanceSq < nearestDistanceSq) {
+        nearestDistanceSq = distanceSq;
+        nearestCrystal = crystal;
+      }
+    }
+
+    if (nearestCrystal) {
+      nearestCrystal.value += value;
+      return nearestCrystal;
+    }
+
+    const newCrystal = createExpCrystal(x, y, value);
+    crystals.push(newCrystal);
+    return newCrystal;
+  }, [createExpCrystal]);
+
+  const mergeNearbyExpCrystals = useCallback(() => {
+    const crystals = expCrystalsRef.current;
+    const crystalCount = crystals.length;
+
+    if (crystalCount < 2) {
+      return;
+    }
+
+    const mergeRadius = getExpCrystalMergeRadius(crystalCount);
+    const mergeRadiusSq = mergeRadius * mergeRadius;
+    let hasMerged = false;
+
+    for (let i = 0; i < crystalCount; i += 1) {
+      const baseCrystal = crystals[i];
+      if (baseCrystal.isCollecting || baseCrystal._merged) {
+        continue;
+      }
+
+      for (let j = i + 1; j < crystalCount; j += 1) {
+        const candidateCrystal = crystals[j];
+        if (candidateCrystal.isCollecting || candidateCrystal._merged) {
+          continue;
+        }
+
+        const dx = baseCrystal.x - candidateCrystal.x;
+        const dy = baseCrystal.y - candidateCrystal.y;
+        const distanceSq = dx * dx + dy * dy;
+
+        if (distanceSq <= mergeRadiusSq) {
+          baseCrystal.value += candidateCrystal.value;
+          candidateCrystal._merged = true;
+          hasMerged = true;
+        }
+      }
+    }
+
+    if (!hasMerged) {
+      return;
+    }
+
+    let writeIndex = 0;
+    for (let i = 0; i < crystalCount; i += 1) {
+      const crystal = crystals[i];
+      if (crystal._merged) {
+        crystal._merged = false;
+        continue;
+      }
+
+      crystals[writeIndex] = crystal;
+      writeIndex += 1;
+    }
+
+    crystals.length = writeIndex;
   }, []);
 
   const stopGameLoop = useCallback(() => {
@@ -515,6 +713,9 @@ export default function GameScreen({ navigation }) {
     }
 
     didGameOverRef.current = true;
+    if (vibrationEnabled) {
+      Vibration.vibrate([0, 200, 100, 300]);
+    }
     gameOverRef.current = true;
     isPlayingRef.current = false;
     isPausedRef.current = false;
@@ -523,7 +724,7 @@ export default function GameScreen({ navigation }) {
     setGameOver(true);
     setIsPlaying(false);
     setIsPaused(false);
-  }, [stopGameLoop]);
+  }, [stopGameLoop, vibrationEnabled]);
 
   const resetRunState = useCallback(() => {
     playerWorldPositionRef.current = { x: 0, y: 0 };
@@ -532,15 +733,22 @@ export default function GameScreen({ navigation }) {
     shipRotationRef.current = 0;
     joystickInputRef.current = { x: 0, y: 0 };
     lastUpdateTimeRef.current = null;
-    frameCountRef.current = 0;
+    lastRenderSyncTimeRef.current = 0;
     enemySpawnAccumulatorRef.current = 0;
     fireAccumulatorRef.current = 0;
     enemyIdCounterRef.current = 0;
     bulletIdCounterRef.current = 0;
     expCrystalIdCounterRef.current = 0;
+    healthDropIdCounterRef.current = 0;
+    magnetDropIdCounterRef.current = 0;
+    fpsFrameCountRef.current = 0;
+    lastFpsUpdateTimeRef.current = 0;
+    lastCrystalMergeTimeRef.current = 0;
     enemiesRef.current = [];
     bulletsRef.current = [];
     expCrystalsRef.current = [];
+    healthDropsRef.current = [];
+    magnetDropsRef.current = [];
     playerHealthRef.current = INITIAL_MAX_HEALTH;
     playerMaxHealthRef.current = INITIAL_MAX_HEALTH;
     lastDamageTimeRef.current = 0;
@@ -562,8 +770,6 @@ export default function GameScreen({ navigation }) {
     expBarFlashUntilRef.current = 0;
     survivalTimeMsRef.current = 0;
 
-    setPlayerWorldPosition({ x: 0, y: 0 });
-    setShipRotation(0);
     setPlayerHealth(INITIAL_MAX_HEALTH);
     setPlayerMaxHealth(INITIAL_MAX_HEALTH);
     playerExpRef.current = 0;
@@ -586,9 +792,8 @@ export default function GameScreen({ navigation }) {
     setHasWon(false);
     setIsVictoryMenuOpen(false);
     setCurrentUpgradeOptions([]);
-    setRenderedEnemies([]);
-    setRenderedBullets([]);
-    setRenderedExpCrystals([]);
+    setFps(0);
+    setRenderTick((tick) => tick + 1);
 
     if (chunkManagerRef.current) {
       const chunks = chunkManagerRef.current.updateChunks(0, 0);
@@ -767,7 +972,16 @@ export default function GameScreen({ navigation }) {
 
       const now = timestamp;
       const deltaTime = now - lastUpdateTimeRef.current;
+      const frameNowMs = Date.now();
       lastUpdateTimeRef.current = now;
+      fpsFrameCountRef.current += 1;
+      if (lastFpsUpdateTimeRef.current === 0) {
+        lastFpsUpdateTimeRef.current = now;
+      } else if (now - lastFpsUpdateTimeRef.current >= 1000) {
+        setFps(fpsFrameCountRef.current);
+        fpsFrameCountRef.current = 0;
+        lastFpsUpdateTimeRef.current = now;
+      }
       const dt = Math.min(deltaTime / 1000, 0.05); // Clamp to avoid large jumps after stalls
       survivalTimeMsRef.current += deltaTime;
 
@@ -782,10 +996,8 @@ export default function GameScreen({ navigation }) {
       }
 
       // Store previous position before applying movement
-      previousWorldPositionRef.current = {
-        x: playerWorldPositionRef.current.x,
-        y: playerWorldPositionRef.current.y,
-      };
+      previousWorldPositionRef.current.x = playerWorldPositionRef.current.x;
+      previousWorldPositionRef.current.y = playerWorldPositionRef.current.y;
 
       const joystickInput = joystickInputRef.current;
 
@@ -802,9 +1014,6 @@ export default function GameScreen({ navigation }) {
         // Calculate rotation angle (in radians)
         const angle = Math.atan2(joystickInput.y, joystickInput.x) + Math.PI / 2;
         shipRotationRef.current = angle;
-
-        // Only update state for rotation (needed for rendering)
-        setShipRotation(angle);
 
         // Check if player moved to a new chunk (only update chunks when crossing chunk boundaries)
         if (chunkManagerRef.current) {
@@ -911,10 +1120,11 @@ export default function GameScreen({ navigation }) {
         }
       }
 
-      const nextEnemies = [];
+      const enemies = enemiesRef.current;
+      let nextEnemyCount = 0;
       let tookDamageThisFrame = false;
-      for (let i = 0; i < enemiesRef.current.length; i += 1) {
-        const enemy = enemiesRef.current[i];
+      for (let i = 0; i < enemies.length; i += 1) {
+        const enemy = enemies[i];
         const dx = playerX - enemy.x;
         const dy = playerY - enemy.y;
         const distanceSq = dx * dx + dy * dy;
@@ -940,7 +1150,7 @@ export default function GameScreen({ navigation }) {
           !tookDamageThisFrame &&
           collisionDistanceSq <= collisionDistance * collisionDistance
         ) {
-          const damageNow = Date.now();
+          const damageNow = frameNowMs;
           if (damageNow - lastDamageTimeRef.current >= DAMAGE_COOLDOWN_MS) {
             lastDamageTimeRef.current = damageNow;
             tookDamageThisFrame = true;
@@ -955,14 +1165,18 @@ export default function GameScreen({ navigation }) {
           }
         }
 
-        nextEnemies.push(enemy);
+        enemy._removed = false;
+        enemies[nextEnemyCount] = enemy;
+        nextEnemyCount += 1;
       }
+      enemies.length = nextEnemyCount;
       const bulletDespawnDistance = Math.max(gameAreaLayout.width, gameAreaLayout.height) * 2 + 400;
       const bulletDespawnDistanceSq = bulletDespawnDistance * bulletDespawnDistance;
-      const nextBullets = [];
+      const bullets = bulletsRef.current;
+      let nextBulletCount = 0;
 
-      for (let i = 0; i < bulletsRef.current.length; i += 1) {
-        const bullet = bulletsRef.current[i];
+      for (let i = 0; i < bullets.length; i += 1) {
+        const bullet = bullets[i];
         bullet.x += bullet.dirX * bullet.speed * dt;
         bullet.y += bullet.dirY * bullet.speed * dt;
         bullet.ageMs += deltaTime;
@@ -978,82 +1192,175 @@ export default function GameScreen({ navigation }) {
           continue;
         }
 
-        nextBullets.push(bullet);
+        bullet._removed = false;
+        bullets[nextBulletCount] = bullet;
+        nextBulletCount += 1;
       }
+      bullets.length = nextBulletCount;
 
-      const bulletsToRemove = new Set();
-      const enemiesToRemove = new Set();
-
-      for (let bulletIndex = 0; bulletIndex < nextBullets.length; bulletIndex += 1) {
-        const bullet = nextBullets[bulletIndex];
-
-        for (let enemyIndex = 0; enemyIndex < nextEnemies.length; enemyIndex += 1) {
-          const enemy = nextEnemies[enemyIndex];
-
-          if (enemiesToRemove.has(enemy.id)) {
+      let hasRemovedEnemies = false;
+      let hasRemovedBullets = false;
+      if (bullets.length > 0 && enemies.length > 0) {
+        for (let bulletIndex = 0; bulletIndex < bullets.length; bulletIndex += 1) {
+          const bullet = bullets[bulletIndex];
+          if (bullet._removed) {
             continue;
           }
 
-          if (
-            !bullet.piercedEnemyIds.has(enemy.id) &&
-            isColliding(
-              bullet.x,
-              bullet.y,
-              bullet.hitRadius,
-              enemy.x,
-              enemy.y,
-              ENEMY_BULLET_HIT_RADIUS
-            )
-          ) {
-            enemy.health -= bullet.damage;
-            enemy.flashUntil = Date.now() + ENEMY_FLASH_DURATION_MS;
-            bullet.piercedEnemyIds.add(enemy.id);
+          for (let enemyIndex = 0; enemyIndex < enemies.length; enemyIndex += 1) {
+            const enemy = enemies[enemyIndex];
 
-            if (bullet.remainingPierces > 0) {
-              bullet.remainingPierces -= 1;
-            } else {
-              bulletsToRemove.add(bullet.id);
+            if (enemy._removed || bullet.piercedEnemyIds.has(enemy.id)) {
+              continue;
             }
 
-            if (enemy.health <= 0) {
-              expCrystalsRef.current.push(createExpCrystal(enemy.x, enemy.y));
-              enemiesToRemove.add(enemy.id);
+            if (
+              isColliding(
+                bullet.x,
+                bullet.y,
+                bullet.hitRadius,
+                enemy.x,
+                enemy.y,
+                ENEMY_BULLET_HIT_RADIUS
+              )
+            ) {
+              enemy.health -= bullet.damage;
+              enemy.flashUntil = frameNowMs + ENEMY_FLASH_DURATION_MS;
+              bullet.piercedEnemyIds.add(enemy.id);
+              bullet.hitCount += 1;
+
+              if (bullet.hitCount >= bullet.maxPierces) {
+                bullet._removed = true;
+                hasRemovedBullets = true;
+              }
+
+              if (enemy.health <= 0) {
+                addExpCrystal(enemy.x, enemy.y);
+                trySpawnHealthDrop(enemy.x, enemy.y);
+                trySpawnMagnetDrop(enemy.x, enemy.y);
+                enemy._removed = true;
+                hasRemovedEnemies = true;
+              }
+              break;
             }
-            break;
           }
         }
       }
 
-      enemiesRef.current = nextEnemies.filter((enemy) => !enemiesToRemove.has(enemy.id));
-      bulletsRef.current = nextBullets.filter((bullet) => !bulletsToRemove.has(bullet.id));
+      if (hasRemovedEnemies) {
+        let writeEnemyIndex = 0;
+        for (let i = 0; i < enemies.length; i += 1) {
+          const enemy = enemies[i];
+          if (enemy._removed) {
+            continue;
+          }
+          enemies[writeEnemyIndex] = enemy;
+          writeEnemyIndex += 1;
+        }
+        enemies.length = writeEnemyIndex;
+      }
+
+      if (hasRemovedBullets) {
+        let writeBulletIndex = 0;
+        for (let i = 0; i < bullets.length; i += 1) {
+          const bullet = bullets[i];
+          if (bullet._removed) {
+            continue;
+          }
+          bullets[writeBulletIndex] = bullet;
+          writeBulletIndex += 1;
+        }
+        bullets.length = writeBulletIndex;
+      }
 
       let expGainedThisFrame = 0;
-      const nextExpCrystals = [];
+      const crystals = expCrystalsRef.current;
+      let nextCrystalCount = 0;
 
-      for (let i = 0; i < expCrystalsRef.current.length; i += 1) {
-        const crystal = expCrystalsRef.current[i];
-        if (!crystal.isCollecting) {
-          if (
-            isColliding(
-              playerX,
-              playerY,
-              pickupRadiusRef.current,
-              crystal.x,
-              crystal.y,
-              EXP_CRYSTAL_PICKUP_RADIUS
-            )
-          ) {
-            crystal.isCollecting = true;
+      if (
+        crystals.length > 1 &&
+        (lastCrystalMergeTimeRef.current === 0 ||
+          now - lastCrystalMergeTimeRef.current >= EXP_CRYSTAL_MERGE_INTERVAL_MS)
+      ) {
+        mergeNearbyExpCrystals();
+        lastCrystalMergeTimeRef.current = now;
+      }
+
+      if (crystals.length > 0) {
+        for (let i = 0; i < crystals.length; i += 1) {
+          const crystal = crystals[i];
+          if (!crystal.isCollecting) {
+            if (
+              isColliding(
+                playerX,
+                playerY,
+                pickupRadiusRef.current,
+                crystal.x,
+                crystal.y,
+                EXP_CRYSTAL_PICKUP_RADIUS
+              )
+            ) {
+              crystal.isCollecting = true;
+            }
           }
+
+          if (crystal.isCollecting) {
+            const dx = playerX - crystal.x;
+            const dy = playerY - crystal.y;
+            const distanceSq = dx * dx + dy * dy;
+
+            if (distanceSq <= CRYSTAL_COLLECT_COMPLETE_RADIUS * CRYSTAL_COLLECT_COMPLETE_RADIUS) {
+              expGainedThisFrame += Math.max(1, Math.round(crystal.value * expMultiplierRef.current));
+              continue;
+            }
+
+            const distance = Math.sqrt(distanceSq);
+            if (distance > 0.0001) {
+              const dirX = dx / distance;
+              const dirY = dy / distance;
+              crystal.x += dirX * crystal.collectSpeed * dt;
+              crystal.y += dirY * crystal.collectSpeed * dt;
+            }
+          }
+
+          crystals[nextCrystalCount] = crystal;
+          nextCrystalCount += 1;
+        }
+      }
+
+      crystals.length = nextCrystalCount;
+      if (expGainedThisFrame > 0) {
+        addPlayerExp(expGainedThisFrame);
+      }
+
+      const healthDrops = healthDropsRef.current;
+      let nextHealthDropCount = 0;
+      const healthDropPickupRadiusSq = HEALTH_DROP_PICKUP_RADIUS * HEALTH_DROP_PICKUP_RADIUS;
+      const healthDropCollectCompleteRadiusSq = CRYSTAL_COLLECT_COMPLETE_RADIUS * CRYSTAL_COLLECT_COMPLETE_RADIUS;
+
+      for (let i = 0; i < healthDrops.length; i += 1) {
+        const healthDrop = healthDrops[i];
+        healthDrop.ageMs += deltaTime;
+
+        if (healthDrop.ageMs > HEALTH_DROP_LIFETIME) {
+          continue;
         }
 
-        if (crystal.isCollecting) {
-          const dx = playerX - crystal.x;
-          const dy = playerY - crystal.y;
-          const distanceSq = dx * dx + dy * dy;
+        const dx = playerX - healthDrop.x;
+        const dy = playerY - healthDrop.y;
+        const distanceSq = dx * dx + dy * dy;
 
-          if (distanceSq <= CRYSTAL_COLLECT_COMPLETE_RADIUS * CRYSTAL_COLLECT_COMPLETE_RADIUS) {
-            expGainedThisFrame += Math.max(1, Math.round(crystal.value * expMultiplierRef.current));
+        if (!healthDrop.isCollecting && distanceSq <= healthDropPickupRadiusSq) {
+          healthDrop.isCollecting = true;
+        }
+
+        if (healthDrop.isCollecting) {
+          if (distanceSq <= healthDropCollectCompleteRadiusSq) {
+            const nextHealth = Math.min(playerHealthRef.current + HEALTH_DROP_HEAL_AMOUNT, playerMaxHealthRef.current);
+            if (nextHealth !== playerHealthRef.current) {
+              playerHealthRef.current = nextHealth;
+              setPlayerHealth(nextHealth);
+            }
             continue;
           }
 
@@ -1061,33 +1368,64 @@ export default function GameScreen({ navigation }) {
           if (distance > 0.0001) {
             const dirX = dx / distance;
             const dirY = dy / distance;
-            crystal.x += dirX * crystal.collectSpeed * dt;
-            crystal.y += dirY * crystal.collectSpeed * dt;
+            healthDrop.x += dirX * healthDrop.collectSpeed * dt;
+            healthDrop.y += dirY * healthDrop.collectSpeed * dt;
           }
         }
 
-        nextExpCrystals.push(crystal);
+        healthDrops[nextHealthDropCount] = healthDrop;
+        nextHealthDropCount += 1;
       }
 
-      expCrystalsRef.current = nextExpCrystals;
-      if (expGainedThisFrame > 0) {
-        addPlayerExp(expGainedThisFrame);
+      healthDrops.length = nextHealthDropCount;
+
+      const magnetDrops = magnetDropsRef.current;
+      let nextMagnetDropCount = 0;
+      const magnetDropAttractionRadiusSq = MAGNET_DROP_ATTRACTION_RADIUS * MAGNET_DROP_ATTRACTION_RADIUS;
+      const magnetDropCollectRadiusSq = MAGNET_DROP_COLLECT_RADIUS * MAGNET_DROP_COLLECT_RADIUS;
+
+      for (let i = 0; i < magnetDrops.length; i += 1) {
+        const magnetDrop = magnetDrops[i];
+        magnetDrop.ageMs += deltaTime;
+
+        if (magnetDrop.ageMs > MAGNET_DROP_LIFETIME) {
+          continue;
+        }
+
+        const dx = playerX - magnetDrop.x;
+        const dy = playerY - magnetDrop.y;
+        const distanceSq = dx * dx + dy * dy;
+
+        if (!magnetDrop.isCollecting && distanceSq <= magnetDropAttractionRadiusSq) {
+          magnetDrop.isCollecting = true;
+        }
+
+        if (magnetDrop.isCollecting) {
+          if (distanceSq <= magnetDropCollectRadiusSq) {
+            activateMagnetEffect();
+            continue;
+          }
+
+          const distance = Math.sqrt(distanceSq);
+          if (distance > 0.0001) {
+            const dirX = dx / distance;
+            const dirY = dy / distance;
+            magnetDrop.x += dirX * magnetDrop.collectSpeed * dt;
+            magnetDrop.y += dirY * magnetDrop.collectSpeed * dt;
+          }
+        }
+
+        magnetDrops[nextMagnetDropCount] = magnetDrop;
+        nextMagnetDropCount += 1;
       }
 
-      // Render uses latest world position each frame
+      magnetDrops.length = nextMagnetDropCount;
+
+      // Render uses latest simulation refs and syncs at a capped rate to reduce reconciliation cost.
       alphaRef.current = 1;
-
-      // Update state for world position less frequently (throttle to reduce re-renders)
-      // Only update every 3 frames to reduce re-renders while keeping smooth camera
-      frameCountRef.current += 1;
-      if (frameCountRef.current % 3 === 0) {
-        setPlayerWorldPosition({
-          x: playerWorldPositionRef.current.x,
-          y: playerWorldPositionRef.current.y,
-        });
-        setRenderedEnemies([...enemiesRef.current]);
-        setRenderedBullets([...bulletsRef.current]);
-        setRenderedExpCrystals([...expCrystalsRef.current]);
+      if (lastRenderSyncTimeRef.current === 0 || now - lastRenderSyncTimeRef.current >= RENDER_SYNC_INTERVAL_MS) {
+        lastRenderSyncTimeRef.current = now;
+        setRenderTick((tick) => tick + 1);
       }
 
       animationFrameRef.current = requestAnimationFrame(gameLoop);
@@ -1102,7 +1440,11 @@ export default function GameScreen({ navigation }) {
     addPlayerExp,
     createBullet,
     createEnemy,
-    createExpCrystal,
+    addExpCrystal,
+    trySpawnHealthDrop,
+    trySpawnMagnetDrop,
+    activateMagnetEffect,
+    mergeNearbyExpCrystals,
     findNearestEnemy,
     handleGameOver,
     gameOver,
@@ -1159,7 +1501,23 @@ export default function GameScreen({ navigation }) {
   const playerFlashUntil = lastDamageTimeRef.current + PLAYER_FLASH_DURATION_MS;
   const isPlayerFlashing = now < playerFlashUntil;
   const shouldShowPlayerFlash = isPlayerFlashing && Math.floor(now / BLINK_INTERVAL_MS) % 2 === 0;
-  const playerShipTransform = [{ rotate: `${shipRotation}rad` }];
+  const playerShipTransform = [{ rotate: `${shipRotationRef.current}rad` }];
+  const visibleCrystals = [];
+  for (let i = 0; i < expCrystalsRef.current.length; i += 1) {
+    const crystal = expCrystalsRef.current[i];
+    const screenX = crystal.x - worldOffsetX;
+    const screenY = crystal.y - worldOffsetY;
+
+    if (
+      screenX >= -CRYSTAL_RENDER_MARGIN &&
+      screenX <= gameAreaLayout.width + CRYSTAL_RENDER_MARGIN &&
+      screenY >= -CRYSTAL_RENDER_MARGIN &&
+      screenY <= gameAreaLayout.height + CRYSTAL_RENDER_MARGIN
+    ) {
+      visibleCrystals.push(crystal);
+    }
+  }
+
   const getUpgradeCurrentValue = useCallback((upgradeId) => {
     switch (upgradeId) {
       case 'damage_up':
@@ -1196,7 +1554,7 @@ export default function GameScreen({ navigation }) {
         ))}
 
         {/* Enemies in world space */}
-        {renderedEnemies.map((enemy) => {
+        {enemiesRef.current.map((enemy) => {
           const renderSize = enemy.size * ENEMY_RENDER_SCALE;
           const isEnemyFlashing = now < enemy.flashUntil;
           const shouldShowEnemyFlash = isEnemyFlashing && Math.floor(now / BLINK_INTERVAL_MS) % 2 === 0;
@@ -1228,7 +1586,7 @@ export default function GameScreen({ navigation }) {
           );
         })}
 
-        {renderedBullets.map((bullet) => {
+        {bulletsRef.current.map((bullet) => {
           const renderSize = BULLET_RENDER_SIZE * (bullet.size / INITIAL_BULLET_SIZE);
 
           return (
@@ -1251,7 +1609,7 @@ export default function GameScreen({ navigation }) {
           );
         })}
 
-        {renderedExpCrystals.map((crystal) => (
+        {visibleCrystals.map((crystal) => (
           <Image
             key={crystal.id}
             source={expCrystalSprite}
@@ -1267,6 +1625,47 @@ export default function GameScreen({ navigation }) {
             ]}
             resizeMode="contain"
           />
+        ))}
+
+        {healthDropsRef.current.map((healthDrop) => (
+          <View
+            key={healthDrop.id}
+            pointerEvents="none"
+            style={[
+              styles.healthDrop,
+              {
+                width: healthDrop.size,
+                height: healthDrop.size,
+                left: healthDrop.x - worldOffsetX - healthDrop.size / 2,
+                top: healthDrop.y - worldOffsetY - healthDrop.size / 2,
+              },
+            ]}
+          >
+            <View style={styles.healthDropCore}>
+              <View style={styles.healthDropCrossVertical} />
+              <View style={styles.healthDropCrossHorizontal} />
+            </View>
+          </View>
+        ))}
+
+        {magnetDropsRef.current.map((magnetDrop) => (
+          <View
+            key={magnetDrop.id}
+            pointerEvents="none"
+            style={[
+              styles.magnetDrop,
+              {
+                width: magnetDrop.size,
+                height: magnetDrop.size,
+                left: magnetDrop.x - worldOffsetX - magnetDrop.size / 2,
+                top: magnetDrop.y - worldOffsetY - magnetDrop.size / 2,
+              },
+            ]}
+          >
+            <View style={styles.magnetDropCore}>
+              <View style={styles.magnetDropInner} />
+            </View>
+          </View>
         ))}
 
         {/* Game content - Player ship (always centered on screen) */}
@@ -1332,6 +1731,12 @@ export default function GameScreen({ navigation }) {
                   ]}
                 />
               </View>
+            </View>
+          )}
+
+          {showFpsEnabled && (
+            <View style={[styles.fpsContainer, { top: insets.top - 14 }]}>
+              <Text style={styles.fpsText}>FPS: {fps}</Text>
             </View>
           )}
 
@@ -1453,6 +1858,56 @@ const styles = StyleSheet.create({
   expCrystal: {
     position: 'absolute',
   },
+  healthDrop: {
+    position: 'absolute',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  healthDropCore: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#b22035',
+    borderWidth: 2,
+    borderColor: '#ffd6dc',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  healthDropCrossVertical: {
+    position: 'absolute',
+    width: 4,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: '#ffffff',
+  },
+  healthDropCrossHorizontal: {
+    position: 'absolute',
+    width: 10,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#ffffff',
+  },
+  magnetDrop: {
+    position: 'absolute',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  magnetDropCore: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#1d4d91',
+    borderWidth: 2,
+    borderColor: '#b8e3ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  magnetDropInner: {
+    width: '45%',
+    height: '45%',
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+  },
   playerShipWrapper: {
     position: 'absolute',
   },
@@ -1477,6 +1932,16 @@ const styles = StyleSheet.create({
   },
   expHudDimmed: {
     opacity: 0.45,
+  },
+  fpsContainer: {
+    position: 'absolute',
+    right: 12,
+    zIndex: 40,
+  },
+  fpsText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   expBarTrack: {
     width: EXP_BAR_WIDTH,
