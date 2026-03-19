@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Switch } from 'react-native';
+import { View, Text, StyleSheet, Switch, ScrollView } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SecondaryButton } from '../components/Buttons';
 
@@ -9,6 +9,10 @@ export default function SettingsScreen({
   onToggleVibration,
   showFpsEnabled,
   onToggleShowFps,
+  musicEnabled,
+  onToggleMusic,
+  sfxEnabled,
+  onToggleSfx,
 }) {
   const insets = useSafeAreaInsets();
 
@@ -24,33 +28,65 @@ export default function SettingsScreen({
           <Text style={styles.settingsTitle}>Settings</Text>
         </View>
 
-        <View style={styles.contentContainer}>
-          <View style={styles.settingsCard}>
-            <View style={styles.settingCopy}>
-              <Text style={styles.settingLabel}>Vibration</Text>
-              <Text style={styles.settingDescription}>Enable vibration feedback on player death</Text>
+        <ScrollView
+          style={styles.contentScroll}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.settingsGrid}>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingCopy}>
+                <Text style={styles.settingLabel}>Vibration</Text>
+                <Text style={styles.settingDescription}>Death feedback</Text>
+              </View>
+              <Switch
+                value={vibrationEnabled}
+                onValueChange={onToggleVibration}
+                trackColor={{ false: '#3a4661', true: '#f6a83b' }}
+                thumbColor={vibrationEnabled ? '#f6e7c1' : '#d9e2f2'}
+              />
             </View>
-            <Switch
-              value={vibrationEnabled}
-              onValueChange={onToggleVibration}
-              trackColor={{ false: '#3a4661', true: '#f6a83b' }}
-              thumbColor={vibrationEnabled ? '#f6e7c1' : '#d9e2f2'}
-            />
-          </View>
 
-          <View style={styles.settingsCard}>
-            <View style={styles.settingCopy}>
-              <Text style={styles.settingLabel}>Show FPS</Text>
-              <Text style={styles.settingDescription}>Display FPS debug counter during gameplay</Text>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingCopy}>
+                <Text style={styles.settingLabel}>Show FPS</Text>
+                <Text style={styles.settingDescription}>Debug counter</Text>
+              </View>
+              <Switch
+                value={showFpsEnabled}
+                onValueChange={onToggleShowFps}
+                trackColor={{ false: '#3a4661', true: '#f6a83b' }}
+                thumbColor={showFpsEnabled ? '#f6e7c1' : '#d9e2f2'}
+              />
             </View>
-            <Switch
-              value={showFpsEnabled}
-              onValueChange={onToggleShowFps}
-              trackColor={{ false: '#3a4661', true: '#f6a83b' }}
-              thumbColor={showFpsEnabled ? '#f6e7c1' : '#d9e2f2'}
-            />
+
+            <View style={styles.settingsCard}>
+              <View style={styles.settingCopy}>
+                <Text style={styles.settingLabel}>Music</Text>
+                <Text style={styles.settingDescription}>Background audio</Text>
+              </View>
+              <Switch
+                value={musicEnabled}
+                onValueChange={onToggleMusic}
+                trackColor={{ false: '#3a4661', true: '#f6a83b' }}
+                thumbColor={musicEnabled ? '#f6e7c1' : '#d9e2f2'}
+              />
+            </View>
+
+            <View style={styles.settingsCard}>
+              <View style={styles.settingCopy}>
+                <Text style={styles.settingLabel}>SFX</Text>
+                <Text style={styles.settingDescription}>Sound effects</Text>
+              </View>
+              <Switch
+                value={sfxEnabled}
+                onValueChange={onToggleSfx}
+                trackColor={{ false: '#3a4661', true: '#f6a83b' }}
+                thumbColor={sfxEnabled ? '#f6e7c1' : '#d9e2f2'}
+              />
+            </View>
           </View>
-        </View>
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -75,7 +111,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingTop: 6,
-    marginBottom: 28,
+    marginBottom: 14,
   },
   gameTitleSmall: {
     fontSize: 32,
@@ -92,40 +128,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   contentContainer: {
-    flex: 1,
-    paddingTop: 8,
+    paddingTop: 4,
+    paddingBottom: 16,
     justifyContent: 'flex-start',
     alignItems: 'center',
   },
+  contentScroll: {
+    flex: 1,
+  },
+  settingsGrid: {
+    width: '100%',
+    maxWidth: 400,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
   settingsCard: {
     backgroundColor: '#101522',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: '#8ca1d1',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    width: '100%',
-    maxWidth: 360,
+    gap: 8,
+    width: '48.5%',
   },
   settingCopy: {
     flex: 1,
-    paddingRight: 10,
+    paddingRight: 6,
   },
   settingLabel: {
     color: '#f6e7c1',
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: 'bold',
-    marginBottom: 3,
+    marginBottom: 1,
   },
   settingDescription: {
     color: '#8ca1d1',
-    fontSize: 11,
-    maxWidth: 210,
-    lineHeight: 15,
+    fontSize: 8,
+    lineHeight: 10,
   },
 });

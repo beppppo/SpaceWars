@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Image, Vibration } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import SpaceChunk from '../components/SpaceChunk';
 import Joystick from '../components/Joystick';
 import GameTimer from '../components/GameTimer';
 import { ChunkManager } from '../utils/ChunkManager';
+import { playDeathSound, playLevelUpSound, playShootSound, stopBackgroundMusic } from '../services/audioManager';
 import enemySprite from '../../assets/enemy.png';
 import expCrystalSprite from '../../assets/expcrystal.png';
 import spaceshipSprite from '../../assets/spaceship.png';
@@ -264,6 +266,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const lastCrystalMergeTimeRef = useRef(0);
   const lastDamageTimeRef = useRef(0);
   const didGameOverRef = useRef(false);
+  const gameOverTimeoutRef = useRef(null);
   const expBarFlashUntilRef = useRef(0);
   const survivalTimeMsRef = useRef(0);
 
@@ -274,6 +277,15 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const viewRadius = 1; // How many chunks to keep around player (reduced for performance)
   const enemySize = 32;
   const playerCollisionRadius = shipSize * 0.4;
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[audio] GameScreen stopping background music');
+      stopBackgroundMusic();
+
+      return undefined;
+    }, [])
+  );
 
   const getEnemySpawnAndDespawnRadii = useCallback((timeSeconds = Number.POSITIVE_INFINITY) => {
     const width = gameAreaLayout.width || screenWidth;
@@ -613,6 +625,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     setPlayerLevel(newLevel);
     setExpToNextLevel(newRequiredExp);
     if (levelsGained > 0) {
+      playLevelUpSound();
       pendingLevelUpsRef.current += levelsGained;
       setPendingLevelUps(pendingLevelUpsRef.current);
 
@@ -713,17 +726,27 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     }
 
     didGameOverRef.current = true;
+    console.log('[audio] player death triggered');
+    playDeathSound();
     if (vibrationEnabled) {
       Vibration.vibrate([0, 200, 100, 300]);
     }
-    gameOverRef.current = true;
-    isPlayingRef.current = false;
-    isPausedRef.current = false;
     joystickInputRef.current = { x: 0, y: 0 };
-    stopGameLoop();
-    setGameOver(true);
-    setIsPlaying(false);
-    setIsPaused(false);
+
+    if (gameOverTimeoutRef.current !== null) {
+      clearTimeout(gameOverTimeoutRef.current);
+    }
+
+    gameOverTimeoutRef.current = setTimeout(() => {
+      gameOverRef.current = true;
+      isPlayingRef.current = false;
+      isPausedRef.current = false;
+      stopGameLoop();
+      setGameOver(true);
+      setIsPlaying(false);
+      setIsPaused(false);
+      gameOverTimeoutRef.current = null;
+    }, 300);
   }, [stopGameLoop, vibrationEnabled]);
 
   const resetRunState = useCallback(() => {
@@ -749,6 +772,10 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     expCrystalsRef.current = [];
     healthDropsRef.current = [];
     magnetDropsRef.current = [];
+    if (gameOverTimeoutRef.current !== null) {
+      clearTimeout(gameOverTimeoutRef.current);
+      gameOverTimeoutRef.current = null;
+    }
     playerHealthRef.current = INITIAL_MAX_HEALTH;
     playerMaxHealthRef.current = INITIAL_MAX_HEALTH;
     lastDamageTimeRef.current = 0;
@@ -1082,6 +1109,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
         if (!nearestEnemy) {
           continue;
         }
+
+        playShootSound();
 
         if (shotCountRef.current === 2) {
           const dx = nearestEnemy.x - playerX;
@@ -1461,6 +1490,10 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
 
   useEffect(() => {
     return () => {
+      if (gameOverTimeoutRef.current !== null) {
+        clearTimeout(gameOverTimeoutRef.current);
+        gameOverTimeoutRef.current = null;
+      }
       stopGameLoop();
       if (restartFrameRef.current !== null) {
         cancelAnimationFrame(restartFrameRef.current);

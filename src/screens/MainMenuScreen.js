@@ -2,13 +2,24 @@
 
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton, SecondaryButton } from '../components/Buttons';
 import { auth } from '../../FirebaseConfig';
+import { setMenuMusicMode, startBackgroundMusic } from '../services/audioManager';
 
 export default function MainMenuScreen({ navigation, onLogout }) {
   const user = auth.currentUser;
   const displayName = user?.displayName || user?.email || 'User';
+
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('[audio] MainMenuScreen applying menu music mode');
+      setMenuMusicMode();
+      console.log('[audio] MainMenuScreen starting background music');
+      void startBackgroundMusic();
+    }, [])
+  );
   
   const handlePlay = () => {
     navigation.navigate('Game');

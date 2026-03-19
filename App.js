@@ -12,11 +12,21 @@ import GameScreen from './src/screens/GameScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { auth } from './FirebaseConfig';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import {
+  cleanupAudio,
+  initializeAudio,
+  setMusicEnabled as applyMusicEnabled,
+  setSfxEnabled as applySfxEnabled,
+  stopBackgroundMusic,
+} from './src/services/audioManager';
 
 const Stack = createNativeStackNavigator();
 const APP_BACKGROUND_COLOR = '#050611';
 const SETTINGS_VIBRATION_KEY = 'SETTINGS_VIBRATION_ENABLED';
 const SETTINGS_SHOW_FPS_KEY = 'SETTINGS_SHOW_FPS';
+const SETTINGS_SOUND_KEY = 'SETTINGS_SOUND_ENABLED';
+const SETTINGS_MUSIC_KEY = 'SETTINGS_MUSIC_ENABLED';
+const SETTINGS_SFX_KEY = 'SETTINGS_SFX_ENABLED';
 const navigationTheme = {
   ...DarkTheme,
   colors: {
@@ -33,13 +43,25 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
   const [showFpsEnabled, setShowFpsEnabled] = useState(true);
+  const [musicEnabled, setMusicEnabled] = useState(true);
+  const [sfxEnabled, setSfxEnabled] = useState(true);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const [storedVibrationEnabled, storedShowFpsEnabled] = await Promise.all([
+        const [
+          storedVibrationEnabled,
+          storedShowFpsEnabled,
+          storedMusicEnabled,
+          storedSfxEnabled,
+          legacyStoredSoundEnabled,
+        ] = await Promise.all([
           AsyncStorage.getItem(SETTINGS_VIBRATION_KEY),
           AsyncStorage.getItem(SETTINGS_SHOW_FPS_KEY),
+          AsyncStorage.getItem(SETTINGS_MUSIC_KEY),
+          AsyncStorage.getItem(SETTINGS_SFX_KEY),
+          AsyncStorage.getItem(SETTINGS_SOUND_KEY),
         ]);
 
         if (storedVibrationEnabled !== null) {
@@ -49,13 +71,49 @@ export default function App() {
         if (storedShowFpsEnabled !== null) {
           setShowFpsEnabled(storedShowFpsEnabled === 'true');
         }
+
+        if (storedMusicEnabled !== null) {
+          setMusicEnabled(storedMusicEnabled === 'true');
+        } else if (legacyStoredSoundEnabled !== null) {
+          setMusicEnabled(legacyStoredSoundEnabled === 'true');
+        }
+
+        if (storedSfxEnabled !== null) {
+          setSfxEnabled(storedSfxEnabled === 'true');
+        } else if (legacyStoredSoundEnabled !== null) {
+          setSfxEnabled(legacyStoredSoundEnabled === 'true');
+        }
       } catch (error) {
         console.error('Failed to load settings:', error);
+      } finally {
+        setSettingsLoaded(true);
       }
     };
 
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    initializeAudio();
+
+    return () => {
+      cleanupAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    applyMusicEnabled(musicEnabled);
+    applySfxEnabled(sfxEnabled);
+
+    if (!settingsLoaded) {
+      return;
+    }
+
+    if (!musicEnabled || !user) {
+      console.log('[audio] App stopping background music');
+      stopBackgroundMusic();
+    }
+  }, [musicEnabled, settingsLoaded, sfxEnabled, user]);
 
   const handleToggleVibration = async (value) => {
     setVibrationEnabled(value);
@@ -74,6 +132,26 @@ export default function App() {
       await AsyncStorage.setItem(SETTINGS_SHOW_FPS_KEY, String(value));
     } catch (error) {
       console.error('Failed to save Show FPS setting:', error);
+    }
+  };
+
+  const handleToggleMusic = async (value) => {
+    setMusicEnabled(value);
+
+    try {
+      await AsyncStorage.setItem(SETTINGS_MUSIC_KEY, String(value));
+    } catch (error) {
+      console.error('Failed to save music setting:', error);
+    }
+  };
+
+  const handleToggleSfx = async (value) => {
+    setSfxEnabled(value);
+
+    try {
+      await AsyncStorage.setItem(SETTINGS_SFX_KEY, String(value));
+    } catch (error) {
+      console.error('Failed to save SFX setting:', error);
     }
   };
 
@@ -161,6 +239,10 @@ export default function App() {
                       onToggleVibration={handleToggleVibration}
                       showFpsEnabled={showFpsEnabled}
                       onToggleShowFps={handleToggleShowFps}
+                      musicEnabled={musicEnabled}
+                      onToggleMusic={handleToggleMusic}
+                      sfxEnabled={sfxEnabled}
+                      onToggleSfx={handleToggleSfx}
                     />
                   )}
                 </Stack.Screen>
