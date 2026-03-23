@@ -19,6 +19,7 @@ import {
   setSfxEnabled as applySfxEnabled,
   stopBackgroundMusic,
 } from './src/services/audioManager';
+import { createUserProfileIfNotExists } from './src/services/userProfileService';
 
 const Stack = createNativeStackNavigator();
 const APP_BACKGROUND_COLOR = '#050611';
@@ -158,6 +159,11 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      if (currentUser) {
+        void createUserProfileIfNotExists(currentUser).catch((error) => {
+          console.error('Failed to create user profile:', error);
+        });
+      }
       if (initializing) {
         setInitializing(false);
       }

@@ -1828,7 +1828,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
             <View style={styles.victoryOverlay}>
               <View style={styles.victoryPanel}>
                 <Text style={styles.victoryTitle}>Victory!</Text>
-                <Text style={styles.victoryMessage}>You survived 20 minutes</Text>
+                <Text style={styles.victoryMessage}>You survived 10 minutes</Text>
                 <TouchableOpacity style={styles.pausePrimaryButton} onPress={handleContinueEndless} activeOpacity={0.8}>
                   <Text style={styles.pausePrimaryButtonText}>Endless</Text>
                 </TouchableOpacity>
