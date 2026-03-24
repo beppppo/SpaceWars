@@ -3,12 +3,14 @@ import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 const SHOOT_SOUND_SOURCE = require('../../assets/Sounds/shoot.wav');
 const LEVEL_UP_SOUND_SOURCE = require('../../assets/Sounds/level-up.wav');
 const DEATH_SOUND_SOURCE = require('../../assets/Sounds/game-over.wav');
+const WIN_SOUND_SOURCE = require('../../assets/Sounds/win.wav');
 const BACKGROUND_MUSIC_SOURCE = require('../../assets/Sounds/bg-music.mp3');
 
 const SHOOT_SOUND_COOLDOWN_MS = 90;
 const SHOOT_SOUND_VOLUME = 0.05;
 const LEVEL_UP_SOUND_VOLUME = 0.15;
 const DEATH_SOUND_VOLUME = 0.3;
+const WIN_SOUND_VOLUME = 0.22;
 const MENU_MUSIC_VOLUME = 0.18;
 
 let audioInitialized = false;
@@ -37,6 +39,9 @@ function createPlayers() {
   const deathPlayer = createAudioPlayer(DEATH_SOUND_SOURCE);
   deathPlayer.volume = DEATH_SOUND_VOLUME;
 
+  const winPlayer = createAudioPlayer(WIN_SOUND_SOURCE);
+  winPlayer.volume = WIN_SOUND_VOLUME;
+
   const backgroundMusicPlayer = createAudioPlayer(BACKGROUND_MUSIC_SOURCE);
   backgroundMusicPlayer.loop = true;
   backgroundMusicPlayer.volume = backgroundMusicVolume;
@@ -45,6 +50,7 @@ function createPlayers() {
     shootPlayer,
     levelUpPlayer,
     deathPlayer,
+    winPlayer,
     backgroundMusicPlayer,
   };
 }
@@ -262,6 +268,15 @@ export function playDeathSound() {
   void initializeAudio().then(() => restartPlayer(players?.deathPlayer, DEATH_SOUND_SOURCE, DEATH_SOUND_VOLUME));
 }
 
+export function playWinSound() {
+  if (!shouldPlaySfx()) {
+    return;
+  }
+
+  console.log('Victory sound played');
+  void initializeAudio().then(() => restartPlayer(players?.winPlayer, WIN_SOUND_SOURCE, WIN_SOUND_VOLUME));
+}
+
 export function cleanupAudio() {
   if (!players) {
     return;
@@ -270,6 +285,7 @@ export function cleanupAudio() {
   players.shootPlayer?.remove();
   players.levelUpPlayer?.remove();
   players.deathPlayer?.remove();
+  players.winPlayer?.remove();
   players.backgroundMusicPlayer?.remove();
   players = null;
   audioInitialized = false;

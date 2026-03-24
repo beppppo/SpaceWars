@@ -28,6 +28,10 @@ export default function MainMenuScreen({ navigation, onLogout }) {
   const handleOpenSettings = () => {
     navigation.navigate('Settings');
   };
+
+  const handleOpenProfile = () => {
+    navigation.navigate('Profile');
+  };
   
   return (
     <SafeAreaView style={styles.screenContainer} edges={['top', 'bottom']}>
@@ -45,7 +49,7 @@ export default function MainMenuScreen({ navigation, onLogout }) {
               <PrimaryButton label="PLAY" onPress={handlePlay} />
             </View>
             <View style={styles.buttonSpacing}>
-              <PrimaryButton label="PROFILE (soon)" onPress={() => {}} />
+              <PrimaryButton label="PROFILE" onPress={handleOpenProfile} />
             </View>
             <View style={styles.buttonSpacing}>
               <PrimaryButton label="SETTINGS" onPress={handleOpenSettings} />

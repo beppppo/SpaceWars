@@ -65,6 +65,7 @@ export default function SplashScreen({ onStart }) {
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const isLandscape = width > height;
+  const contentLift = isLandscape ? 18 : 36;
   
   // Calculate margins
   const topMargin = insets.top + (isLandscape ? 8 : 28);
@@ -98,17 +99,17 @@ export default function SplashScreen({ onStart }) {
   
   if (totalContentHeight <= availableHeight) {
     // Enough space - center everything
-    const startY = topMargin + (availableHeight - totalContentHeight) / 2;
+    const startY = topMargin + (availableHeight - totalContentHeight) / 2 - contentLift;
     titleTop = startY;
     shipTop = startY + titleHeight + spacing - 20; // Move ship up by 20px
-    buttonBottom = bottomMargin + (availableHeight - totalContentHeight) / 2;
+    buttonBottom = bottomMargin + (availableHeight - totalContentHeight) / 2 + contentLift;
   } else {
     // Not enough space - minimal spacing
     const minSpacing = isLandscape ? 5 : 10;
     const adjustedSpacing = Math.max(minSpacing, (availableHeight - titleHeight - shipSize - buttonHeight) / 3);
-    titleTop = topMargin;
+    titleTop = Math.max(insets.top, topMargin - contentLift);
     shipTop = titleTop + titleHeight + adjustedSpacing - 20; // Move ship up by 20px
-    buttonBottom = bottomMargin;
+    buttonBottom = bottomMargin + contentLift;
   }
   const handlePress = React.useCallback(() => {
     if (onStart && typeof onStart === 'function') {

@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  LogBox,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton, SecondaryButton } from '../components/Buttons';
@@ -16,7 +17,6 @@ import { auth } from '../../FirebaseConfig';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
-  sendEmailVerification,
   updateProfile
 } from 'firebase/auth';
 
@@ -38,12 +38,16 @@ const showAlert = (title, message, buttons) => {
   }
 };
 
+LogBox.ignoreLogs(['[auth] Login error:', '[auth] Registration error:']);
+
 export default function AuthScreen({ onAuthSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [registerError, setRegisterError] = useState('');
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -54,35 +58,14 @@ export default function AuthScreen({ onAuthSuccess }) {
     setLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      setLoginError('');
       console.log('User logged in:', userCredential.user.email);
       if (onAuthSuccess) {
         onAuthSuccess(userCredential.user);
       }
     } catch (error) {
-      console.error('Login error:', error);
-      let errorMessage = 'Failed to log in';
-      
-      switch (error.code) {
-        case 'auth/invalid-email':
-          errorMessage = 'Invalid email address';
-          break;
-        case 'auth/user-not-found':
-          errorMessage = 'No account found with this email';
-          break;
-        case 'auth/wrong-password':
-          errorMessage = 'Incorrect password';
-          break;
-        case 'auth/invalid-credential':
-          errorMessage = 'Invalid email or password';
-          break;
-        case 'auth/too-many-requests':
-          errorMessage = 'Too many failed attempts. Please try again later';
-          break;
-        default:
-          errorMessage = error.message;
-      }
-      
-      showAlert('Login Failed', errorMessage);
+      console.error('[auth] Login error:', error);
+      setLoginError('Email or password is incorrect');
     } finally {
       setLoading(false);
     }
@@ -95,7 +78,7 @@ export default function AuthScreen({ onAuthSuccess }) {
     }
 
     if (password.length < 6) {
-      showAlert('Error', 'Password must be at least 6 characters long');
+      setRegisterError('Password must be at lest 6 characters long');
       return;
     }
 
@@ -108,43 +91,30 @@ export default function AuthScreen({ onAuthSuccess }) {
       await updateProfile(userCredential.user, {
         displayName: name
       });
-      
-      // Send email verification
-      await sendEmailVerification(userCredential.user);
-      
-      showAlert(
-        'Registration Successful', 
-        'A verification email has been sent to your email address.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (onAuthSuccess) {
-                onAuthSuccess(userCredential.user);
-              }
-            }
-          }
-        ]
-      );
+      setRegisterError('');
+
+      if (onAuthSuccess) {
+        onAuthSuccess(userCredential.user);
+      }
     } catch (error) {
-      console.error('Registration error:', error);
+      console.error('[auth] Registration error:', error);
       let errorMessage = 'Failed to create account';
       
       switch (error.code) {
         case 'auth/email-already-in-use':
-          errorMessage = 'This email is already registered. Please log in instead or use a different email address.';
+          errorMessage = 'This email is already in use';
           break;
         case 'auth/invalid-email':
           errorMessage = 'Invalid email address';
           break;
         case 'auth/weak-password':
-          errorMessage = 'Password is too weak. Use at least 6 characters';
+          errorMessage = 'Password does not meet the requirements';
           break;
         default:
-          errorMessage = error.message;
+          errorMessage = 'Failed to create account';
       }
       
-      showAlert('Registration Failed', errorMessage);
+      setRegisterError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -167,7 +137,12 @@ export default function AuthScreen({ onAuthSuccess }) {
                 placeholder="Enter your name"
                 placeholderTextColor="#4d607f"
                 value={name}
-                onChangeText={setName}
+                onChangeText={(value) => {
+                  setName(value);
+                  if (registerError) {
+                    setRegisterError('');
+                  }
+                }}
                 autoCapitalize="words"
                 editable={!loading}
               />
@@ -181,7 +156,15 @@ export default function AuthScreen({ onAuthSuccess }) {
             placeholder="Enter email"
             placeholderTextColor="#4d607f"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(value) => {
+              setEmail(value);
+              if (loginError) {
+                setLoginError('');
+              }
+              if (registerError) {
+                setRegisterError('');
+              }
+            }}
             keyboardType="email-address"
             autoCapitalize="none"
             editable={!loading}
@@ -194,9 +177,25 @@ export default function AuthScreen({ onAuthSuccess }) {
             placeholderTextColor="#4d607f"
             secureTextEntry
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(value) => {
+              setPassword(value);
+              if (loginError) {
+                setLoginError('');
+              }
+              if (registerError) {
+                setRegisterError('');
+              }
+            }}
             editable={!loading}
           />
+
+          {!isRegistering && loginError ? (
+            <Text style={styles.inlineErrorText}>{loginError}</Text>
+          ) : null}
+
+          {isRegistering && registerError ? (
+            <Text style={styles.inlineErrorText}>{registerError}</Text>
+          ) : null}
 
           <View style={{ height: 10 }} />
 
@@ -292,6 +291,12 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  inlineErrorText: {
+    color: '#d96363',
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'left',
   },
 });
 

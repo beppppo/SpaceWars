@@ -6,7 +6,9 @@ import SpaceChunk from '../components/SpaceChunk';
 import Joystick from '../components/Joystick';
 import GameTimer from '../components/GameTimer';
 import { ChunkManager } from '../utils/ChunkManager';
-import { playDeathSound, playLevelUpSound, playShootSound, stopBackgroundMusic } from '../services/audioManager';
+import { playDeathSound, playLevelUpSound, playShootSound, playWinSound, stopBackgroundMusic } from '../services/audioManager';
+import { updateUserStatsOnRunEnd } from '../services/userProfileService';
+import { auth } from '../../FirebaseConfig';
 import enemySprite from '../../assets/enemy.png';
 import expCrystalSprite from '../../assets/expcrystal.png';
 import spaceshipSprite from '../../assets/spaceship.png';
@@ -269,6 +271,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const gameOverTimeoutRef = useRef(null);
   const expBarFlashUntilRef = useRef(0);
   const survivalTimeMsRef = useRef(0);
+  const didSyncRunStatsRef = useRef(false);
+  const killsThisRunRef = useRef(0);
 
   // Ship properties
   const shipSize = 50;
@@ -555,6 +559,28 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     isLoopRunningRef.current = false;
   }, []);
 
+  const syncRunStats = useCallback(() => {
+    if (didSyncRunStatsRef.current) {
+      return;
+    }
+
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      console.log('[stats] No authenticated user, skipping end-of-game update');
+      return;
+    }
+
+    didSyncRunStatsRef.current = true;
+    const survivalTimeSeconds = Math.floor(survivalTimeMsRef.current / 1000);
+    const victoryTimeSeconds = Math.floor(VICTORY_TIME_MS / 1000);
+    const killsThisRun = killsThisRunRef.current;
+
+    void updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryTimeSeconds, killsThisRun).catch((error) => {
+      console.log('[stats] Failed to update userStats:', error);
+      didSyncRunStatsRef.current = false;
+    });
+  }, []);
+
   const getRandomUpgradeOptions = useCallback((count = 3) => {
     const pool = UPGRADE_POOL.filter((upgrade) => {
       if (!upgrade.repeatable && acquiredUpgradeIdsRef.current.has(upgrade.id)) {
@@ -742,12 +768,13 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       isPlayingRef.current = false;
       isPausedRef.current = false;
       stopGameLoop();
+      syncRunStats();
       setGameOver(true);
       setIsPlaying(false);
       setIsPaused(false);
       gameOverTimeoutRef.current = null;
     }, 300);
-  }, [stopGameLoop, vibrationEnabled]);
+  }, [stopGameLoop, syncRunStats, vibrationEnabled]);
 
   const resetRunState = useCallback(() => {
     playerWorldPositionRef.current = { x: 0, y: 0 };
@@ -796,6 +823,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     shotCountRef.current = INITIAL_SHOT_COUNT;
     expBarFlashUntilRef.current = 0;
     survivalTimeMsRef.current = 0;
+    didSyncRunStatsRef.current = false;
+    killsThisRunRef.current = 0;
 
     setPlayerHealth(INITIAL_MAX_HEALTH);
     setPlayerMaxHealth(INITIAL_MAX_HEALTH);
@@ -1016,6 +1045,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
         hasWonRef.current = true;
         isVictoryMenuOpenRef.current = true;
         joystickInputRef.current = { x: 0, y: 0 };
+        playWinSound();
+        syncRunStats();
         setHasWon(true);
         setIsVictoryMenuOpen(true);
         stopGameLoop();
@@ -1264,6 +1295,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
               }
 
               if (enemy.health <= 0) {
+                killsThisRunRef.current += 1;
                 addExpCrystal(enemy.x, enemy.y);
                 trySpawnHealthDrop(enemy.x, enemy.y);
                 trySpawnMagnetDrop(enemy.x, enemy.y);
@@ -1485,6 +1517,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     isPlaying,
     isVictoryMenuOpen,
     playerCollisionRadius,
+    syncRunStats,
     stopGameLoop,
   ]);
 
