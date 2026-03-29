@@ -19,6 +19,8 @@ export async function createUserProfileIfNotExists(user) {
     getDoc(settingsRef),
   ]);
 
+  // We create each document independently so older accounts can self-heal if one collection
+  // exists and another is missing.
   if (!userSnapshot.exists()) {
     await setDoc(userRef, {
       username: user.displayName || 'Player',
@@ -69,6 +71,7 @@ export async function updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryT
   const statsRef = doc(db, 'userStats', uid);
 
   await runTransaction(db, async (transaction) => {
+    // The transaction keeps bestTime / wins / totalKills consistent even if multiple writes happen close together.
     const statsSnapshot = await transaction.get(statsRef);
     const statsData = statsSnapshot.exists() ? statsSnapshot.data() : {};
     const currentBestTime = Number(statsData.bestTime) || 0;
@@ -101,6 +104,7 @@ export async function uploadUserProfilePhoto(uid, imageUri) {
   console.log('[profile] Upload starting');
   const response = await fetch(imageUri);
   const imageBlob = await response.blob();
+  // One fixed file per user keeps Storage tidy and makes overwrites predictable.
   const storageRef = ref(storage, `profilePictures/${uid}.jpg`);
 
   await uploadBytes(storageRef, imageBlob);
@@ -149,6 +153,7 @@ export async function updateUserSettings(uid, updates) {
       ...updates,
       updatedAt: serverTimestamp(),
     },
+    // Merge keeps this helper safe if we later add more settings fields.
     { merge: true }
   );
 }

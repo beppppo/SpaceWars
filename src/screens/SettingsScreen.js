@@ -29,6 +29,7 @@ export default function SettingsScreen({
 
   const handleDeleteUserPress = () => {
     console.log('[settings] Delete User button pressed');
+    // Reopen this flow from a clean state every time so old password mistakes do not linger.
     setDeletePassword('');
     setDeletePasswordError('');
     setIsDeleteModalOpen(true);
@@ -49,6 +50,7 @@ export default function SettingsScreen({
     }
 
     if (onDeleteUser) {
+      // App.js owns the actual deletion flow. This screen just handles modal UX and inline feedback.
       const result = await onDeleteUser(deletePassword);
       if (result?.success) {
         setIsDeleteModalOpen(false);
@@ -156,6 +158,7 @@ export default function SettingsScreen({
           contentContainerStyle={styles.contentContainer}
           showsVerticalScrollIndicator={false}
         >
+          {/* Small cards keep the screen readable without turning settings into one long list. */}
           <View style={styles.settingsGrid}>
             <View style={styles.settingsCard}>
               <View style={styles.settingCopy}>
@@ -222,6 +225,7 @@ export default function SettingsScreen({
                 <Text style={styles.settingLabel}>Delete User</Text>
                 <Text style={styles.settingDescriptionWide}>Delete account and all saved user data</Text>
               </View>
+              {/* Keep the action behind a modal so it is hard to trigger by accident. */}
               <SecondaryButton label="DELETE" onPress={handleDeleteUserPress} />
             </View>
           </View>

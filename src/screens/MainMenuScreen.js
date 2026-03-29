@@ -8,12 +8,14 @@ import { PrimaryButton, SecondaryButton } from '../components/Buttons';
 import { auth } from '../../FirebaseConfig';
 import { setMenuMusicMode, startBackgroundMusic } from '../services/audioManager';
 
-export default function MainMenuScreen({ navigation, onLogout }) {
+export default function MainMenuScreen({ navigation, onLogout, onPlayStart }) {
   const user = auth.currentUser;
+  // Prefer the friendly name, but fall back to email so the header never feels empty.
   const displayName = user?.displayName || user?.email || 'User';
 
   useFocusEffect(
     React.useCallback(() => {
+      // Re-apply menu audio every time we come back here so gameplay audio does not leak across screens.
       console.log('[audio] MainMenuScreen applying menu music mode');
       setMenuMusicMode();
       console.log('[audio] MainMenuScreen starting background music');
@@ -22,6 +24,10 @@ export default function MainMenuScreen({ navigation, onLogout }) {
   );
   
   const handlePlay = () => {
+    // Let the app refresh any "come back later" reminder right when a new run starts.
+    if (onPlayStart) {
+      void onPlayStart();
+    }
     navigation.navigate('Game');
   };
 
@@ -45,6 +51,7 @@ export default function MainMenuScreen({ navigation, onLogout }) {
 
         <View style={styles.mainMenuRow}>
           <View style={styles.menuButtonsColumn}>
+            {/* Keep the main actions grouped on the left and leave the ship to carry the empty space. */}
             <View style={styles.buttonSpacing}>
               <PrimaryButton label="PLAY" onPress={handlePlay} />
             </View>

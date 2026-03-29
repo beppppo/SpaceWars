@@ -3,7 +3,7 @@ import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { AppState, Modal, Pressable, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SplashScreen from './src/screens/SplashScreen';
 import AuthScreen from './src/screens/AuthScreen';
@@ -27,6 +27,7 @@ import {
   resetUserRunData,
   updateUserSettings,
 } from './src/services/userProfileService';
+import { refreshInactivityReminder } from './src/services/inactivityReminderService';
 
 const Stack = createNativeStackNavigator();
 const APP_BACKGROUND_COLOR = '#050611';
@@ -59,6 +60,8 @@ export default function App() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
+        // We still keep the local copy of settings so the app can boot with the last known values
+        // before Firestore finishes loading for the signed-in user.
         const [
           storedVibrationEnabled,
           storedShowFpsEnabled,
@@ -103,10 +106,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Audio is initialized once here so screens can just ask for sounds without worrying about setup.
     initializeAudio();
 
     return () => {
       cleanupAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    // Every time the app becomes active again, we treat that as "the user came back"
+    // and restart the inactivity timer from scratch.
+    void refreshInactivityReminder();
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void refreshInactivityReminder();
+      }
+    });
+
+    return () => {
+      subscription.remove();
     };
   }, []);
 
@@ -149,6 +169,8 @@ export default function App() {
     console.log('[settings] setting changed:', { musicEnabled: value });
 
     try {
+      // Keep AsyncStorage and Firestore in sync so settings work both offline-ish on boot
+      // and across future sessions/devices.
       await Promise.all([
         AsyncStorage.setItem(SETTINGS_MUSIC_KEY, String(value)),
         auth.currentUser?.uid ? updateUserSettings(auth.currentUser.uid, { musicEnabled: value }) : Promise.resolve(),
@@ -205,10 +227,13 @@ export default function App() {
     console.log('[settings] Delete User confirmed');
 
     try {
+      // Firebase requires a fresh auth session before destructive account actions.
       const credential = EmailAuthProvider.credential(currentUser.email, password);
       await reauthenticateWithCredential(currentUser, credential);
       console.log('[settings] User reauthenticated');
 
+      // We only touch Firestore after reauth passes, otherwise we could delete app data
+      // and still fail the actual account deletion.
       await deleteUserData(currentUser.uid);
       console.log('[settings] Firestore documents deleted');
 
@@ -241,6 +266,8 @@ export default function App() {
       void (async () => {
         if (currentUser) {
           try {
+            // This is our main user bootstrap step: make sure the user docs exist,
+            // then hydrate settings from Firestore into the app state.
             await createUserProfileIfNotExists(currentUser);
             const remoteSettings = await getUserSettings(currentUser.uid);
 
@@ -393,6 +420,9 @@ export default function App() {
                   {(props) => (
                     <MainMenuScreen
                       navigation={props.navigation}
+                      onPlayStart={() => {
+                        void refreshInactivityReminder();
+                      }}
                       onLogout={async () => {
                         await handleLogout();
                         // Don't navigate here - let onAuthStateChanged handle it

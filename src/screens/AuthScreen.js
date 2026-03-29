@@ -58,6 +58,7 @@ export default function AuthScreen({ onAuthSuccess }) {
     setLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      // Keep auth errors inline so the screen feels calm instead of noisy.
       setLoginError('');
       console.log('User logged in:', userCredential.user.email);
       if (onAuthSuccess) {
@@ -77,6 +78,7 @@ export default function AuthScreen({ onAuthSuccess }) {
       return;
     }
 
+    // Mirror the Firebase rule here so people get instant feedback before we even hit the network.
     if (password.length < 6) {
       setRegisterError('Password must be at lest 6 characters long');
       return;
@@ -87,7 +89,7 @@ export default function AuthScreen({ onAuthSuccess }) {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       console.log('User registered:', userCredential.user.email);
       
-      // Update user profile with name
+      // We keep the display name on the auth user because the menu/profile screens already read it.
       await updateProfile(userCredential.user, {
         displayName: name
       });
@@ -158,6 +160,7 @@ export default function AuthScreen({ onAuthSuccess }) {
             value={email}
             onChangeText={(value) => {
               setEmail(value);
+              // As soon as they edit either field, treat it as a fresh attempt.
               if (loginError) {
                 setLoginError('');
               }
@@ -179,6 +182,7 @@ export default function AuthScreen({ onAuthSuccess }) {
             value={password}
             onChangeText={(value) => {
               setPassword(value);
+              // Password edits should clear both login and register inline errors.
               if (loginError) {
                 setLoginError('');
               }

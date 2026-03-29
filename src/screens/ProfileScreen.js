@@ -16,6 +16,7 @@ const DEFAULT_PROFILE = {
 };
 
 function formatDurationSeconds(totalSeconds) {
+  // Firestore stores raw seconds, but the screen should read like a real stat panel.
   const safeSeconds = Math.max(0, Math.floor(totalSeconds || 0));
   const minutes = Math.floor(safeSeconds / 60);
   const seconds = safeSeconds % 60;
@@ -42,6 +43,7 @@ export default function ProfileScreen({ navigation }) {
     try {
       const userRef = doc(db, 'users', currentUser.uid);
       const statsRef = doc(db, 'userStats', currentUser.uid);
+      // These live in separate collections on purpose, so load them together and merge locally.
       const [userSnapshot, statsSnapshot] = await Promise.all([
         getDoc(userRef),
         getDoc(statsRef),
@@ -76,6 +78,7 @@ export default function ProfileScreen({ navigation }) {
 
     try {
       setUploadingPhoto(true);
+      // Reuse the shared upload helper so camera and gallery both follow the exact same save path.
       await uploadUserProfilePhoto(currentUser.uid, imageUri);
       await loadProfile();
     } catch (error) {
@@ -101,6 +104,7 @@ export default function ProfileScreen({ navigation }) {
       const pickerResult = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
+        // Keeping it square here saves us from weird avatar crops later.
         aspect: [1, 1],
         quality: 0.8,
       });
@@ -131,6 +135,7 @@ export default function ProfileScreen({ navigation }) {
       console.log('[profile] Camera opened');
       const cameraResult = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
+        // Match the gallery crop so both sources behave the same in the UI.
         aspect: [1, 1],
         quality: 0.8,
       });
@@ -151,6 +156,7 @@ export default function ProfileScreen({ navigation }) {
       return;
     }
 
+    // Prevent stacked uploads by only allowing the chooser when the current one is finished.
     setIsPhotoModalOpen(true);
   };
 
@@ -221,6 +227,7 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.statsHeaderText}>COMBAT RECORD</Text>
               </View>
 
+              {/* Keep the stats in one panel so it feels like HUD data instead of separate cards. */}
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>Best Time</Text>
                 <Text style={styles.statValue}>{formatDurationSeconds(profile.bestTime)}</Text>

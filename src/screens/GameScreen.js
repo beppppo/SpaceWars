@@ -119,16 +119,19 @@ function getNextExpRequirement(currentRequirement) {
 }
 
 function getSpawnInterval(timeSeconds) {
+  // Spawn pressure ramps up over time, but we keep a floor so the game does not turn into a wall of enemies.
   const spawnLevel = Math.floor(timeSeconds / 12);
   return Math.max(300, Math.floor(BASE_ENEMY_SPAWN_INTERVAL_MS * Math.pow(0.95, spawnLevel)));
 }
 
 function getEnemyHealth(timeSeconds) {
+  // Health scales slower than spawn rate so the difficulty curve feels like "more chaos first, tankier enemies later".
   const spawnLevel = Math.floor(timeSeconds / 90);
   return BASE_ENEMY_HEALTH + spawnLevel * 2;
 }
 
 function getEnemySpeed(timeSeconds) {
+  // Speed ramps even more slowly so enemies stay readable and dodgeable.
   const speedLevel = Math.floor(timeSeconds / 120);
   return BASE_ENEMY_SPEED + speedLevel * 3;
 }
@@ -202,7 +205,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const [fps, setFps] = useState(0);
   const [, setRenderTick] = useState(0);
 
-  // World and chunk management
+  // Chunked background lets the world feel infinite without rendering an actually infinite scene.
   const chunkManagerRef = useRef(null);
   const [activeChunks, setActiveChunks] = useState([]);
 
@@ -212,7 +215,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   // Player world position (infinite space coordinates) - simulation stays in refs
   const playerWorldPositionRef = useRef({ x: 0, y: 0 });
 
-  // For interpolation
+  // We keep the previous position around so render can stay visually smooth even though
+  // the simulation itself lives mostly in refs.
   const previousWorldPositionRef = useRef({ x: 0, y: 0 });
   const alphaRef = useRef(0);
 
@@ -284,6 +288,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
 
   useFocusEffect(
     useCallback(() => {
+      // Menu music should always stop once gameplay owns the screen.
       console.log('[audio] GameScreen stopping background music');
       stopBackgroundMusic();
 
@@ -297,6 +302,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     const halfDiagonal = Math.sqrt(width * width + height * height) / 2;
     const spawnMargin = getSpawnMargin(timeSeconds);
     return {
+      // Spawn just outside the visible area, then give enemies a much larger leash before cleanup.
       spawnRadius: halfDiagonal + spawnMargin,
       despawnRadius: halfDiagonal * 3 + 600,
     };
@@ -306,6 +312,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     const angle = Math.random() * Math.PI * 2;
     const { spawnRadius } = getEnemySpawnAndDespawnRadii(timeSeconds);
     let speed = getEnemySpeed(timeSeconds);
+    // Hard-cap enemy speed against player speed so late-game enemies still feel fair.
     const maxEnemySpeed = playerSpeedRef.current * 0.75;
     speed = Math.min(speed, maxEnemySpeed);
     const maxHealth = getEnemyHealth(timeSeconds);
@@ -368,6 +375,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       damage: bulletDamageRef.current,
       speed: BULLET_SPEED,
       size: bulletSizeRef.current,
+      // Bigger bullets get a slightly bigger hit radius so upgrades feel honest.
       hitRadius: Math.max(BULLET_ENEMY_HIT_RADIUS, Math.floor(bulletSizeRef.current * 0.35)),
       maxPierces: bulletPierceCountRef.current,
       hitCount: 0,
@@ -487,6 +495,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     }
 
     if (nearestCrystal) {
+      // Merge into a nearby crystal when possible so the field does not get flooded with tiny pickups.
       nearestCrystal.value += value;
       return nearestCrystal;
     }
@@ -536,6 +545,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       return;
     }
 
+    // Compact the array in-place to avoid churning a brand-new collection every merge cycle.
     let writeIndex = 0;
     for (let i = 0; i < crystalCount; i += 1) {
       const crystal = crystals[i];
@@ -575,6 +585,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     const victoryTimeSeconds = Math.floor(VICTORY_TIME_MS / 1000);
     const killsThisRun = killsThisRunRef.current;
 
+    // We sync once per run so game over and victory can't double-count stats.
     void updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryTimeSeconds, killsThisRun).catch((error) => {
       console.log('[stats] Failed to update userStats:', error);
       didSyncRunStatsRef.current = false;
@@ -594,6 +605,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       return true;
     });
 
+    // Shuffle first, then walk forward so upgrades stay simple and cheap to pick.
     for (let i = pool.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -640,6 +652,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       newLevel += 1;
       levelsGained += 1;
       newRequiredExp = getNextExpRequirement(newRequiredExp);
+      // Keep a short flash window so level-ups feel noticeable without stopping the run immediately.
       expBarFlashUntilRef.current = Date.now() + EXP_BAR_FLASH_DURATION_MS;
     }
 
@@ -655,6 +668,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       pendingLevelUpsRef.current += levelsGained;
       setPendingLevelUps(pendingLevelUpsRef.current);
 
+      // Open the menu once and let queued level-ups drain through it one by one.
       if (!isLevelUpMenuOpenRef.current) {
         openLevelUpMenu();
       }
@@ -664,6 +678,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const handleSelectUpgrade = useCallback((upgradeId) => {
     const selectedUpgrade = UPGRADE_POOL.find((upgrade) => upgrade.id === upgradeId);
 
+    // Each upgrade writes through to both ref + state so the live simulation and the UI stay in sync.
     switch (upgradeId) {
       case 'fire_rate': {
         const nextFireIntervalMs = Math.max(150, Math.floor(fireIntervalMsRef.current * 0.9));
@@ -751,6 +766,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       return;
     }
 
+    // This guard matters because several enemies can overlap the player in the same frame.
     didGameOverRef.current = true;
     console.log('[audio] player death triggered');
     playDeathSound();
@@ -764,6 +780,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     }
 
     gameOverTimeoutRef.current = setTimeout(() => {
+      // Small delay lets the hit feedback land before we freeze the run.
       gameOverRef.current = true;
       isPlayingRef.current = false;
       isPausedRef.current = false;
@@ -777,6 +794,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   }, [stopGameLoop, syncRunStats, vibrationEnabled]);
 
   const resetRunState = useCallback(() => {
+    // This is the full "start fresh" reset for a new run. Anything that should not leak
+    // between runs belongs here.
     playerWorldPositionRef.current = { x: 0, y: 0 };
     previousWorldPositionRef.current = { x: 0, y: 0 };
     alphaRef.current = 0;
@@ -875,6 +894,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     hasWonRef.current = hasWon;
     isVictoryMenuOpenRef.current = isVictoryMenuOpen;
     gameOverRef.current = gameOver;
+    // Refs are what the animation loop reads, so mirror state changes into them immediately.
   }, [gameOver, hasWon, isLevelUpMenuOpen, isPaused, isPlaying, isVictoryMenuOpen]);
 
   useEffect(() => {
@@ -1045,6 +1065,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
         hasWonRef.current = true;
         isVictoryMenuOpenRef.current = true;
         joystickInputRef.current = { x: 0, y: 0 };
+        // Victory uses the same stats sync path as death so profile data stays consistent.
         playWinSound();
         syncRunStats();
         setHasWon(true);
@@ -1121,6 +1142,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       const currentSpawnIntervalMs = getSpawnInterval(survivalTimeSeconds);
 
       enemySpawnAccumulatorRef.current += deltaTime;
+      // Accumulator-based spawning keeps the average spawn rate stable even when frame timing jitters.
       while (enemySpawnAccumulatorRef.current >= currentSpawnIntervalMs) {
         enemySpawnAccumulatorRef.current -= currentSpawnIntervalMs;
         enemiesRef.current.push(createEnemy(playerX, playerY, survivalTimeSeconds));
@@ -1128,11 +1150,13 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
 
       const minimumActiveEnemies = getMinimumActiveEnemies(survivalTimeSeconds);
       const missingEnemies = minimumActiveEnemies - enemiesRef.current.length;
+      // Backfill up to a floor so the arena never goes strangely empty.
       for (let i = 0; i < missingEnemies; i += 1) {
         enemiesRef.current.push(createEnemy(playerX, playerY, survivalTimeSeconds));
       }
 
       fireAccumulatorRef.current += deltaTime;
+      // Same pattern for firing so attack cadence stays consistent across frame rates.
       while (fireAccumulatorRef.current >= fireIntervalMsRef.current) {
         fireAccumulatorRef.current -= fireIntervalMsRef.current;
 
@@ -1158,6 +1182,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
               { x: -perpendicularX * DOUBLE_SHOT_SPAWN_OFFSET, y: -perpendicularY * DOUBLE_SHOT_SPAWN_OFFSET },
             ];
 
+            // Offset the pair left/right of the ship center so double-shot reads clearly.
             for (let i = 0; i < spawnOffsets.length; i += 1) {
               const bullet = createBullet(playerX, playerY, nearestEnemy.x, nearestEnemy.y, 0, spawnOffsets[i]);
               if (bullet) {
@@ -1261,6 +1286,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       let hasRemovedEnemies = false;
       let hasRemovedBullets = false;
       if (bullets.length > 0 && enemies.length > 0) {
+        // Collision stays O(n*m) for now, but the counts are still low enough that this is fine.
         for (let bulletIndex = 0; bulletIndex < bullets.length; bulletIndex += 1) {
           const bullet = bullets[bulletIndex];
           if (bullet._removed) {
@@ -1295,6 +1321,8 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
               }
 
               if (enemy.health <= 0) {
+                // We count kills exactly where enemies are actually removed so totalKills matches
+                // real enemy deaths, not just successful hits.
                 killsThisRunRef.current += 1;
                 addExpCrystal(enemy.x, enemy.y);
                 trySpawnHealthDrop(enemy.x, enemy.y);
@@ -1309,6 +1337,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       }
 
       if (hasRemovedEnemies) {
+        // Compact in-place instead of filtering to keep garbage collection pressure down mid-run.
         let writeEnemyIndex = 0;
         for (let i = 0; i < enemies.length; i += 1) {
           const enemy = enemies[i];
@@ -1343,6 +1372,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
         (lastCrystalMergeTimeRef.current === 0 ||
           now - lastCrystalMergeTimeRef.current >= EXP_CRYSTAL_MERGE_INTERVAL_MS)
       ) {
+        // Merge on a timer instead of every frame so large crystal fields stay cheap.
         mergeNearbyExpCrystals();
         lastCrystalMergeTimeRef.current = now;
       }
@@ -1371,6 +1401,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
             const distanceSq = dx * dx + dy * dy;
 
             if (distanceSq <= CRYSTAL_COLLECT_COMPLETE_RADIUS * CRYSTAL_COLLECT_COMPLETE_RADIUS) {
+              // Apply EXP only once the crystal actually reaches the ship.
               expGainedThisFrame += Math.max(1, Math.round(crystal.value * expMultiplierRef.current));
               continue;
             }
@@ -1463,6 +1494,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
 
         if (magnetDrop.isCollecting) {
           if (distanceSq <= magnetDropCollectRadiusSq) {
+            // Magnet is a global pickup effect, so collecting one flips every loose crystal into collect mode.
             activateMagnetEffect();
             continue;
           }
@@ -1569,6 +1601,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const shouldShowPlayerFlash = isPlayerFlashing && Math.floor(now / BLINK_INTERVAL_MS) % 2 === 0;
   const playerShipTransform = [{ rotate: `${shipRotationRef.current}rad` }];
   const visibleCrystals = [];
+  // Cull crystal rendering to what is near the screen. The actual simulation keeps them all.
   for (let i = 0; i < expCrystalsRef.current.length; i += 1) {
     const crystal = expCrystalsRef.current[i];
     const screenX = crystal.x - worldOffsetX;
