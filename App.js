@@ -3,7 +3,8 @@ import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, Modal, Pressable, Text, View } from 'react-native';
+import * as NavigationBar from 'expo-navigation-bar';
+import { AppState, Modal, Platform, Pressable, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SplashScreen from './src/screens/SplashScreen';
 import AuthScreen from './src/screens/AuthScreen';
@@ -115,13 +116,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const applyAndroidNavigationBar = async () => {
+      if (Platform.OS !== 'android') {
+        return;
+      }
+
+      try {
+        await NavigationBar.setBehaviorAsync('overlay-swipe');
+        await NavigationBar.setVisibilityAsync('hidden');
+      } catch (error) {
+        console.log('[ui] Failed to hide Android navigation bar:', error);
+      }
+    };
+
     // Every time the app becomes active again, we treat that as "the user came back"
     // and restart the inactivity timer from scratch.
     void refreshInactivityReminder();
+    void applyAndroidNavigationBar();
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         void refreshInactivityReminder();
+        void applyAndroidNavigationBar();
       }
     });
 
@@ -313,6 +329,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: APP_BACKGROUND_COLOR }}>
+        <StatusBar hidden />
         <Modal
           visible={showDeleteSuccessModal}
           transparent

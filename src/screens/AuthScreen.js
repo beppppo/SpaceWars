@@ -123,13 +123,14 @@ export default function AuthScreen({ onAuthSuccess }) {
   };
 
   return (
-    <SafeAreaView style={styles.screenContainer} edges={['bottom']}>
+    <SafeAreaView style={styles.screenContainer} edges={['top', 'bottom']}>
       <View style={styles.spaceBackground}>
-        <Text style={styles.gameTitleSmall}>SPACEWARS</Text>
-        <View style={styles.authBox}>
-          <Text style={styles.authModeTitle}>
-            {isRegistering ? 'CREATE ACCOUNT' : 'LOG IN'}
-          </Text>
+        <View style={styles.contentBlock}>
+          <Text style={styles.gameTitleSmall}>SPACEWARS</Text>
+          <View style={styles.authBox}>
+            <Text style={styles.authModeTitle}>
+              {isRegistering ? 'CREATE ACCOUNT' : 'LOG IN'}
+            </Text>
 
           {isRegistering && (
             <>
@@ -148,7 +149,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                 autoCapitalize="words"
                 editable={!loading}
               />
-              <View style={{ height: 10 }} />
+              <View style={{ height: 8 }} />
             </>
           )}
 
@@ -173,7 +174,7 @@ export default function AuthScreen({ onAuthSuccess }) {
             editable={!loading}
           />
 
-          <Text style={[styles.label, { marginTop: 10 }]}>PASSWORD</Text>
+          <Text style={[styles.label, { marginTop: 8 }]}>PASSWORD</Text>
           <TextInput
             style={styles.input}
             placeholder="Enter password"
@@ -201,7 +202,7 @@ export default function AuthScreen({ onAuthSuccess }) {
             <Text style={styles.inlineErrorText}>{registerError}</Text>
           ) : null}
 
-          <View style={{ height: 10 }} />
+          <View style={{ height: 8 }} />
 
           {loading ? (
             <View style={styles.loadingContainer}>
@@ -215,11 +216,12 @@ export default function AuthScreen({ onAuthSuccess }) {
                     label="REGISTER"
                     onPress={handleRegister}
                   />
-                  <View style={{ height: 8 }} />
+                  <View style={{ height: 6 }} />
                   <SecondaryButton
                     label="BACK TO LOGIN"
                     onPress={() => setIsRegistering(false)}
                   />
+                  <View style={{ height: 14 }} />
                 </>
               ) : (
                 <>
@@ -227,7 +229,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                     label="LOG IN"
                     onPress={handleLogin}
                   />
-                  <View style={{ height: 8 }} />
+                  <View style={{ height: 6 }} />
                   <SecondaryButton
                     label="CREATE ACCOUNT"
                     onPress={() => setIsRegistering(true)}
@@ -236,6 +238,7 @@ export default function AuthScreen({ onAuthSuccess }) {
               )}
             </>
           )}
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -250,34 +253,39 @@ const styles = StyleSheet.create({
   spaceBackground: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingTop: 32,
+    paddingBottom: 34,
     justifyContent: 'center',
   },
+  contentBlock: {
+    marginTop: 18,
+  },
   gameTitleSmall: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#f6a83b',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   authBox: {
     marginHorizontal: 20,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 12,
     backgroundColor: '#111728',
     borderWidth: 2,
     borderColor: '#283557',
   },
   authModeTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
     color: '#f6a83b',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   label: {
     color: '#f6e7c1',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   input: {
@@ -286,20 +294,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#283557',
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     marginTop: 3,
     color: '#f6e7c1',
-    fontSize: 14,
+    fontSize: 13,
   },
   loadingContainer: {
-    paddingVertical: 20,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   inlineErrorText: {
     color: '#d96363',
     fontSize: 12,
-    marginTop: 8,
+    marginTop: 6,
     textAlign: 'left',
   },
 });
