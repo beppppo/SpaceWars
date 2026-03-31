@@ -276,6 +276,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   const expBarFlashUntilRef = useRef(0);
   const survivalTimeMsRef = useRef(0);
   const didSyncRunStatsRef = useRef(false);
+  const didEnterEndlessModeRef = useRef(false);
   const killsThisRunRef = useRef(0);
 
   // Ship properties
@@ -569,27 +570,29 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     isLoopRunningRef.current = false;
   }, []);
 
-  const syncRunStats = useCallback(() => {
+  const syncRunStats = useCallback(async (source = 'run end', runSnapshot = null) => {
     if (didSyncRunStatsRef.current) {
       return;
     }
 
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      console.log('[stats] No authenticated user, skipping end-of-game update');
       return;
     }
 
     didSyncRunStatsRef.current = true;
-    const survivalTimeSeconds = Math.floor(survivalTimeMsRef.current / 1000);
+    const survivalTimeSeconds =
+      runSnapshot?.survivalTimeSeconds ?? Math.floor(survivalTimeMsRef.current / 1000);
     const victoryTimeSeconds = Math.floor(VICTORY_TIME_MS / 1000);
-    const killsThisRun = killsThisRunRef.current;
+    const killsThisRun = runSnapshot?.killsThisRun ?? killsThisRunRef.current;
 
     // We sync once per run so game over and victory can't double-count stats.
-    void updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryTimeSeconds, killsThisRun).catch((error) => {
-      console.log('[stats] Failed to update userStats:', error);
+    try {
+      await updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryTimeSeconds, killsThisRun);
+    } catch (error) {
+      console.error('Failed to update userStats:', error);
       didSyncRunStatsRef.current = false;
-    });
+    }
   }, []);
 
   const getRandomUpgradeOptions = useCallback((count = 3) => {
@@ -785,7 +788,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       isPlayingRef.current = false;
       isPausedRef.current = false;
       stopGameLoop();
-      syncRunStats();
+      void syncRunStats('game over');
       setGameOver(true);
       setIsPlaying(false);
       setIsPaused(false);
@@ -843,6 +846,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     expBarFlashUntilRef.current = 0;
     survivalTimeMsRef.current = 0;
     didSyncRunStatsRef.current = false;
+    didEnterEndlessModeRef.current = false;
     killsThisRunRef.current = 0;
 
     setPlayerHealth(INITIAL_MAX_HEALTH);
@@ -966,10 +970,20 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     setIsPaused(false);
   }, [gameOver, isLevelUpMenuOpen, isPlaying, isVictoryMenuOpen]);
 
-  const restartGame = useCallback(() => {
+  const restartGame = useCallback(async () => {
+    const runSnapshot = {
+      survivalTimeSeconds: Math.floor(survivalTimeMsRef.current / 1000),
+      includedEndlessMode: didEnterEndlessModeRef.current,
+      killsThisRun: killsThisRunRef.current,
+    };
+
     stopGameLoop();
     joystickInputRef.current = { x: 0, y: 0 };
+    setIsPlaying(false);
     setIsPaused(false);
+
+    await syncRunStats('pause restart', runSnapshot);
+
     setHasWon(false);
     setIsVictoryMenuOpen(false);
     setGameOver(false);
@@ -985,9 +999,15 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       restartFrameRef.current = null;
       setIsPlaying(true);
     });
-  }, [resetRunState, stopGameLoop]);
+  }, [resetRunState, stopGameLoop, syncRunStats]);
 
-  const handleExitToMenu = useCallback(() => {
+  const handleExitToMenu = useCallback(async () => {
+    const runSnapshot = {
+      survivalTimeSeconds: Math.floor(survivalTimeMsRef.current / 1000),
+      includedEndlessMode: didEnterEndlessModeRef.current,
+      killsThisRun: killsThisRunRef.current,
+    };
+
     stopGameLoop();
     if (restartFrameRef.current !== null) {
       cancelAnimationFrame(restartFrameRef.current);
@@ -997,6 +1017,9 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     joystickInputRef.current = { x: 0, y: 0 };
     setIsPaused(false);
     setIsPlaying(false);
+
+    await syncRunStats('return to main menu', runSnapshot);
+
     setHasWon(false);
     setIsVictoryMenuOpen(false);
     setGameOver(false);
@@ -1007,9 +1030,10 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       index: 0,
       routes: [{ name: MAIN_MENU_ROUTE }],
     });
-  }, [navigation, resetRunState, stopGameLoop]);
+  }, [navigation, resetRunState, stopGameLoop, syncRunStats]);
 
   const handleContinueEndless = useCallback(() => {
+    didEnterEndlessModeRef.current = true;
     joystickInputRef.current = { x: 0, y: 0 };
     isVictoryMenuOpenRef.current = false;
     setIsVictoryMenuOpen(false);
@@ -1062,12 +1086,11 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       survivalTimeMsRef.current += deltaTime;
 
       if (!hasWonRef.current && survivalTimeMsRef.current >= VICTORY_TIME_MS) {
+        survivalTimeMsRef.current = Math.max(survivalTimeMsRef.current, VICTORY_TIME_MS);
         hasWonRef.current = true;
         isVictoryMenuOpenRef.current = true;
         joystickInputRef.current = { x: 0, y: 0 };
-        // Victory uses the same stats sync path as death so profile data stays consistent.
         playWinSound();
-        syncRunStats();
         setHasWon(true);
         setIsVictoryMenuOpen(true);
         stopGameLoop();

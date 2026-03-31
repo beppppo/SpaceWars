@@ -59,14 +59,8 @@ export async function createUserProfileIfNotExists(user) {
 
 export async function updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryTimeSeconds, killsThisRun = 0) {
   if (!uid) {
-    console.log('[stats] Missing uid, skipping end-of-game update');
     return;
   }
-
-  console.log('[stats] End-of-game update running for uid:', uid);
-  console.log('[stats] Survival time being sent:', survivalTimeSeconds);
-  console.log('[stats] Configured victory time:', victoryTimeSeconds);
-  console.log('[stats] Kills this run:', killsThisRun);
 
   const statsRef = doc(db, 'userStats', uid);
 
@@ -78,15 +72,12 @@ export async function updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryT
     const currentWins = Number(statsData.wins) || 0;
     const shouldUpdateBestTime = survivalTimeSeconds > currentBestTime;
     const shouldIncrementWins = survivalTimeSeconds >= victoryTimeSeconds;
-
-    console.log('[stats] bestTime updated:', shouldUpdateBestTime);
-    console.log('[stats] counted as win:', shouldIncrementWins);
-    console.log('[stats] totalKills increment applied:', killsThisRun);
+    const nextBestTime = shouldUpdateBestTime ? survivalTimeSeconds : currentBestTime;
 
     transaction.set(
       statsRef,
       {
-        bestTime: shouldUpdateBestTime ? survivalTimeSeconds : currentBestTime,
+        bestTime: nextBestTime,
         wins: shouldIncrementWins ? currentWins + 1 : currentWins,
         totalKills: increment(killsThisRun),
         updatedAt: serverTimestamp(),
