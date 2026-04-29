@@ -71,12 +71,12 @@ const INITIAL_EXP_MULTIPLIER = 1;
 const INITIAL_BULLET_PIERCE_COUNT = 1;
 const INITIAL_SHOT_COUNT = 1;
 // Victory condition (10 minutes)
-// For testing you can temporarily change to something like 10000 (10s)
 const VICTORY_TIME_MS = 10 * 60 * 1000;
 const DOUBLE_SHOT_SPAWN_OFFSET = 8;
 const DOUBLE_SHOT_ANGLE_OFFSET_DEG = 8;
 const TRIPLE_SHOT_ANGLE_OFFSET_DEG = 12;
 
+// Upgrade definitions shown in the level-up menu.
 const UPGRADE_POOL = [
   { id: 'damage_up', title: 'Power Shots', description: 'Increase bullet damage by 5', repeatable: true },
   { id: 'fire_rate', title: 'Rapid Fire', description: 'Shoot 10% faster', repeatable: true },
@@ -106,6 +106,7 @@ const UPGRADE_POOL = [
   },
 ];
 
+// Collision helper: checks whether two circular hit areas overlap.
 function isColliding(x1, y1, r1, x2, y2, r2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -118,6 +119,7 @@ function getNextExpRequirement(currentRequirement) {
   return Math.floor(currentRequirement * 1.25);
 }
 
+// Controls how often enemies spawn as survival time increases.
 function getSpawnInterval(timeSeconds) {
   // Spawn pressure ramps up over time, but we keep a floor so the game does not turn into a wall of enemies.
   const spawnLevel = Math.floor(timeSeconds / 12);
@@ -309,6 +311,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     };
   }, [gameAreaLayout.height, gameAreaLayout.width, screenHeight, screenWidth]);
 
+  // Creates one enemy just outside the visible play area around the player.
   const createEnemy = useCallback((playerX, playerY, timeSeconds) => {
     const angle = Math.random() * Math.PI * 2;
     const { spawnRadius } = getEnemySpawnAndDespawnRadii(timeSeconds);
@@ -351,6 +354,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   }, []);
 
   const createBullet = useCallback((playerX, playerY, targetX, targetY, angleOffsetDeg = 0, spawnOffset = null) => {
+    // Bullet course calculation: find the direction from the player to the target enemy.
     const dx = targetX - playerX;
     const dy = targetY - playerY;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -366,6 +370,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     const dirY = Math.sin(angleRad);
     const angleDeg = angleRad * 180 / Math.PI;
 
+    // Actual bullet creation: this object becomes a bullet once it is pushed into bulletsRef.
     return {
       id: bulletIdCounterRef.current,
       x: spawnOffset ? playerX + spawnOffset.x : playerX,
@@ -472,6 +477,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     }
   }, []);
 
+  // Adds EXP to the field, merging into nearby crystals when possible.
   const addExpCrystal = useCallback((x, y, value = EXP_CRYSTAL_VALUE) => {
     const crystals = expCrystalsRef.current;
     const mergeRadius = getExpCrystalMergeRadius(crystals.length);
@@ -595,6 +601,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     }
   }, []);
 
+  // Chooses the upgrade cards shown when the player levels up.
   const getRandomUpgradeOptions = useCallback((count = 3) => {
     const pool = UPGRADE_POOL.filter((upgrade) => {
       if (!upgrade.repeatable && acquiredUpgradeIdsRef.current.has(upgrade.id)) {
@@ -635,11 +642,13 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     return selectedOptions;
   }, []);
 
+  // Opens the level-up upgrade menu with a fresh set of upgrade choices.
   const openLevelUpMenu = useCallback(() => {
     setCurrentUpgradeOptions(getRandomUpgradeOptions(3));
     setIsLevelUpMenuOpen(true);
   }, [getRandomUpgradeOptions]);
 
+  // Main EXP and level-up logic: add EXP, handle level gains, and open the upgrade menu.
   const addPlayerExp = useCallback((amount) => {
     if (amount <= 0 || gameOverRef.current) {
       return;
@@ -678,6 +687,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     }
   }, [openLevelUpMenu]);
 
+  // Applies the selected upgrade and closes or refreshes the upgrade menu.
   const handleSelectUpgrade = useCallback((upgradeId) => {
     const selectedUpgrade = UPGRADE_POOL.find((upgrade) => upgrade.id === upgradeId);
 
@@ -764,6 +774,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     setIsLevelUpMenuOpen(false);
   }, [getRandomUpgradeOptions]);
 
+  // Lose handler: stops the run, plays feedback, saves stats, and opens the game-over screen.
   const handleGameOver = useCallback(() => {
     if (didGameOverRef.current) {
       return;
@@ -948,6 +959,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     joystickInputRef.current = { x: 0, y: 0 };
   }, []);
 
+  // Pause button logic: toggles the pause menu and stops player input while paused.
   const togglePause = useCallback(() => {
     if (gameOver || !isPlaying || isLevelUpMenuOpen || isVictoryMenuOpen) {
       return;
@@ -962,6 +974,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     });
   }, [gameOver, isLevelUpMenuOpen, isPlaying, isVictoryMenuOpen]);
 
+  // Resume option: closes the pause menu and continues the current run.
   const resumeGame = useCallback(() => {
     if (gameOver || !isPlaying || isLevelUpMenuOpen || isVictoryMenuOpen) {
       return;
@@ -1039,6 +1052,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
     setIsVictoryMenuOpen(false);
   }, []);
 
+  // Victory option: exit after winning and return to the main menu.
   const handleExitAfterVictory = useCallback(() => {
     isVictoryMenuOpenRef.current = false;
     setIsVictoryMenuOpen(false);
@@ -1085,6 +1099,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       const dt = Math.min(deltaTime / 1000, 0.05); // Clamp to avoid large jumps after stalls
       survivalTimeMsRef.current += deltaTime;
 
+      // Winning condition: survival timer reached the victory time.
       if (!hasWonRef.current && survivalTimeMsRef.current >= VICTORY_TIME_MS) {
         survivalTimeMsRef.current = Math.max(survivalTimeMsRef.current, VICTORY_TIME_MS);
         hasWonRef.current = true;
@@ -1164,6 +1179,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       const despawnRadiusSq = despawnRadius * despawnRadius;
       const currentSpawnIntervalMs = getSpawnInterval(survivalTimeSeconds);
 
+      // Timed enemy spawning: create enemies whenever the spawn interval has elapsed.
       enemySpawnAccumulatorRef.current += deltaTime;
       // Accumulator-based spawning keeps the average spawn rate stable even when frame timing jitters.
       while (enemySpawnAccumulatorRef.current >= currentSpawnIntervalMs) {
@@ -1174,10 +1190,12 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
       const minimumActiveEnemies = getMinimumActiveEnemies(survivalTimeSeconds);
       const missingEnemies = minimumActiveEnemies - enemiesRef.current.length;
       // Backfill up to a floor so the arena never goes strangely empty.
+      // Minimum enemy backfill: spawn extra enemies if the arena has too few active enemies.
       for (let i = 0; i < missingEnemies; i += 1) {
         enemiesRef.current.push(createEnemy(playerX, playerY, survivalTimeSeconds));
       }
 
+      // Automatic shooting starts here: build up time until the next shot interval is reached.
       fireAccumulatorRef.current += deltaTime;
       // Same pattern for firing so attack cadence stays consistent across frame rates.
       while (fireAccumulatorRef.current >= fireIntervalMsRef.current) {
@@ -1209,6 +1227,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
             for (let i = 0; i < spawnOffsets.length; i += 1) {
               const bullet = createBullet(playerX, playerY, nearestEnemy.x, nearestEnemy.y, 0, spawnOffsets[i]);
               if (bullet) {
+                // Activates the created bullet by adding it to the running simulation.
                 bulletsRef.current.push(bullet);
               }
             }
@@ -1222,6 +1241,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
           for (let i = 0; i < shotOffsets.length; i += 1) {
             const bullet = createBullet(playerX, playerY, nearestEnemy.x, nearestEnemy.y, shotOffsets[i]);
             if (bullet) {
+              // Activates the created bullet by adding it to the running simulation.
               bulletsRef.current.push(bullet);
             }
           }
@@ -1241,7 +1261,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
         if (distanceSq > despawnRadiusSq) {
           continue;
         }
-
+        // Enemies Movement - Move the enemy toward the player using a normalized direction vector.
         const distance = Math.sqrt(distanceSq);
         if (distance > 0.0001) {
           const dirX = dx / distance;
@@ -1263,10 +1283,12 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
             lastDamageTimeRef.current = damageNow;
             tookDamageThisFrame = true;
 
+            // Enemy contact damage: reduce player HP and trigger game over at zero.
             const nextHealth = Math.max(playerHealthRef.current - DAMAGE_PER_HIT, 0);
             playerHealthRef.current = nextHealth;
             setPlayerHealth(nextHealth);
 
+            // Losing condition: player HP reached zero.
             if (nextHealth <= 0) {
               handleGameOver();
             }
@@ -1323,6 +1345,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
               continue;
             }
 
+            // Bullet/enemy collision: check whether this bullet hit this enemy.
             if (
               isColliding(
                 bullet.x,
@@ -1347,6 +1370,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
                 // We count kills exactly where enemies are actually removed so totalKills matches
                 // real enemy deaths, not just successful hits.
                 killsThisRunRef.current += 1;
+                // Enemy death reward: spawn EXP at the enemy position.
                 addExpCrystal(enemy.x, enemy.y);
                 trySpawnHealthDrop(enemy.x, enemy.y);
                 trySpawnMagnetDrop(enemy.x, enemy.y);
@@ -1404,6 +1428,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
         for (let i = 0; i < crystals.length; i += 1) {
           const crystal = crystals[i];
           if (!crystal.isCollecting) {
+            // Player/crystal collision: start pulling the crystal in once the player is close enough.
             if (
               isColliding(
                 playerX,
@@ -1445,6 +1470,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
 
       crystals.length = nextCrystalCount;
       if (expGainedThisFrame > 0) {
+        // Apply all EXP collected by crystals that reached the player this frame.
         addPlayerExp(expGainedThisFrame);
       }
 
@@ -1471,6 +1497,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
 
         if (healthDrop.isCollecting) {
           if (distanceSq <= healthDropCollectCompleteRadiusSq) {
+            // Health drop collected: heal the player without exceeding max HP.
             const nextHealth = Math.min(playerHealthRef.current + HEALTH_DROP_HEAL_AMOUNT, playerMaxHealthRef.current);
             if (nextHealth !== playerHealthRef.current) {
               playerHealthRef.current = nextHealth;
@@ -1662,7 +1689,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
   return (
     <SafeAreaView style={styles.screenContainer} edges={['top', 'bottom']}>
       <View style={styles.gameArea} onLayout={handleGameAreaLayout}>
-        {/* Render space chunks */}
+        {/* Infinite-space rendering: draw only the active chunks near the player. */}
         {activeChunks.map((chunk) => (
           <SpaceChunk
             key={chunk.key}
@@ -1708,6 +1735,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
           );
         })}
 
+        {/* Bullet rendering: draw every active bullet currently stored in bulletsRef. */}
         {bulletsRef.current.map((bullet) => {
           const renderSize = BULLET_RENDER_SIZE * (bullet.size / INITIAL_BULLET_SIZE);
 
@@ -1828,6 +1856,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
             }}
           />
 
+          {/* HP HUD: shows current health, max health, and health bar. */}
           {!gameOver && (
             <View style={[styles.expHud, (isPaused || isLevelUpMenuOpen || isVictoryMenuOpen) && styles.expHudDimmed, { top: 54, left: 20 }]}>
               <View style={styles.expBarTrack}>
@@ -1882,6 +1911,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
             </View>
           )}
 
+          {/* Level-up upgrade screen: shows upgrade choices and waits for the player to pick one. */}
           {isLevelUpMenuOpen && !isVictoryMenuOpen && !gameOver && (
             <View style={styles.levelUpOverlay}>
               <View style={styles.levelUpPanel}>
@@ -1918,6 +1948,7 @@ export default function GameScreen({ navigation, vibrationEnabled = true, showFp
               <View style={styles.victoryPanel}>
                 <Text style={styles.victoryTitle}>Victory!</Text>
                 <Text style={styles.victoryMessage}>You survived 10 minutes</Text>
+                {/* Victory choices: continue in endless mode or exit back to the menu. */}
                 <TouchableOpacity style={styles.pausePrimaryButton} onPress={handleContinueEndless} activeOpacity={0.8}>
                   <Text style={styles.pausePrimaryButtonText}>Endless</Text>
                 </TouchableOpacity>

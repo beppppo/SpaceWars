@@ -19,7 +19,7 @@ export async function createUserProfileIfNotExists(user) {
     getDoc(settingsRef),
   ]);
 
-  // We create each document independently so older accounts can self-heal if one collection
+  // I create each document independently so older accounts can self-heal if one collection
   // exists and another is missing.
   if (!userSnapshot.exists()) {
     await setDoc(userRef, {
@@ -57,6 +57,7 @@ export async function createUserProfileIfNotExists(user) {
   }
 }
 
+// Called when a run ends to save best time, wins, and total kills in Firestore.
 export async function updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryTimeSeconds, killsThisRun = 0) {
   if (!uid) {
     return;
@@ -74,6 +75,7 @@ export async function updateUserStatsOnRunEnd(uid, survivalTimeSeconds, victoryT
     const shouldIncrementWins = survivalTimeSeconds >= victoryTimeSeconds;
     const nextBestTime = shouldUpdateBestTime ? survivalTimeSeconds : currentBestTime;
 
+    // This is the actual Firestore write that updates the saved game stats.
     transaction.set(
       statsRef,
       {

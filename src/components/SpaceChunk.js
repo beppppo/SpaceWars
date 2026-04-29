@@ -31,6 +31,7 @@ function generateChunkStars(chunkX, chunkY, chunkSize, seed, starsPerChunk = 35)
   return stars;
 }
 
+// Renders one deterministic star chunk based on its chunk coordinates and seed.
 const SpaceChunk = React.memo(({ chunkX, chunkY, chunkSize, worldOffsetX, worldOffsetY, seed }) => {
   // Generate stars for this chunk (memoized)
   const stars = useMemo(() => {

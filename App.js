@@ -29,6 +29,7 @@ import {
 } from './src/services/userProfileService';
 import { refreshInactivityReminder } from './src/services/inactivityReminderService';
 
+// Main navigation stack used to register and switch between app screens.
 const Stack = createNativeStackNavigator();
 const APP_BACKGROUND_COLOR = '#050611';
 const SETTINGS_VIBRATION_KEY = 'SETTINGS_VIBRATION_ENABLED';
@@ -57,6 +58,7 @@ export default function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [showDeleteSuccessModal, setShowDeleteSuccessModal] = useState(false);
 
+  // Auth state controls which screen group is available: logged-out screens or logged-in screens.
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -378,6 +380,7 @@ export default function App() {
           </View>
         </Modal>
         <StatusBar style="light" translucent backgroundColor={APP_BACKGROUND_COLOR} />
+        {/* Navigation root: all app screens live inside this container. */}
         <NavigationContainer theme={navigationTheme}>
           <Stack.Navigator
             initialRouteName={showSplash && !user ? "Splash" : (user ? "MainMenu" : "Auth")}
@@ -414,6 +417,7 @@ export default function App() {
               </Stack.Screen>
             )}
             
+            {/* Logged-in navigation screens. */}
             {user && (
               <>
                 <Stack.Screen name="MainMenu">
